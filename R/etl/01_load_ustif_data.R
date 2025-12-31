@@ -4,7 +4,7 @@
 # ============================================================================
 # Purpose: Import and clean proprietary USTIF Excel datasets
 # Input: Raw Excel files in data/raw/
-# Output: Cleaned .rds files in data/processed/
+# Output: Cleaned .rds and .csv files in data/processed/
 # ============================================================================
 
 cat("\n========================================\n")
@@ -29,9 +29,10 @@ if (!exists("paths")) {
 data_dict <- readRDS(file.path(paths$processed, "data_dictionary.rds"))
 
 # ============================================================================
-# HELPER FUNCTION: Add entries to data dictionary
+# HELPER FUNCTIONS
 # ============================================================================
 
+# Add entries to data dictionary
 add_to_dictionary <- function(df, source_file, description_prefix = "") {
   new_entries <- tibble(
     variable_name = names(df),
@@ -44,6 +45,14 @@ add_to_dictionary <- function(df, source_file, description_prefix = "") {
     notes = ""
   )
   return(new_entries)
+}
+
+# Save dataset as both RDS and CSV
+save_dataset <- function(df, name, path = paths$processed) {
+  saveRDS(df, file.path(path, paste0(name, ".rds")))
+  write_csv(df, file.path(path, paste0(name, ".csv")))
+  cat(paste0("✓ Saved: ", path, "/", name, ".rds\n"))
+  cat(paste0("✓ Saved: ", path, "/", name, ".csv\n\n"))
 }
 
 # ============================================================================
@@ -64,7 +73,6 @@ cat(paste("  Columns:", ncol(contracts_raw), "\n"))
 # Data cleaning
 contracts <- contracts_raw %>%
   rename(
-    # Standardize key field names
     claim_number = contract_jobs_claim_number,
     contract_id = contract_job_identifier,
     adjuster = adjuster_full_name,
@@ -108,7 +116,6 @@ contracts <- contracts_raw %>%
     # Create closure indicator
     brings_to_closure_flag = str_detect(tolower(coalesce(brings_to_closure, "")), "yes|true|closure")
   ) %>%
-  # Remove rows with missing claim numbers (likely header artifacts)
   filter(!is.na(claim_number) & claim_number != "")
 
 cat(paste("  Cleaned records:", nrow(contracts), "\n"))
@@ -125,8 +132,7 @@ print(table(contracts$auction_type, useNA = "ifany"))
 data_dict <- bind_rows(data_dict, add_to_dictionary(contracts, "Actuarial_Contract_Data_2.xlsx"))
 
 # Save cleaned data
-saveRDS(contracts, file.path(paths$processed, "contracts_clean.rds"))
-cat("✓ Saved: data/processed/contracts_clean.rds\n\n")
+save_dataset(contracts, "contracts_clean")
 
 # ============================================================================
 # DATASET 2: Tank Construction/Closure Data
@@ -146,7 +152,6 @@ cat(paste("  Columns:", ncol(tanks_raw), "\n"))
 # Data cleaning
 tanks <- tanks_raw %>%
   rename(
-    # Standardize field names
     facility_id = pf_other_id,
     facility_name = facility_name,
     client_id = client_id,
@@ -200,7 +205,6 @@ tanks <- tanks_raw %>%
     # Underground vs aboveground
     is_underground = (tank_type == "UST")
   ) %>%
-  # Remove records with missing facility ID
   filter(!is.na(facility_id) & facility_id != "")
 
 cat(paste("  Cleaned records:", nrow(tanks), "\n"))
@@ -220,8 +224,7 @@ print(table(tanks$status_desc, useNA = "ifany"))
 data_dict <- bind_rows(data_dict, add_to_dictionary(tanks, "Tank_Construction_Closed.xlsx"))
 
 # Save cleaned data
-saveRDS(tanks, file.path(paths$processed, "tanks_clean.rds"))
-cat("✓ Saved: data/processed/tanks_clean.rds\n\n")
+save_dataset(tanks, "tanks_clean")
 
 # ============================================================================
 # DATASET 3: Individual Claims Data
@@ -241,24 +244,16 @@ cat(paste("  Columns:", ncol(claims_raw), "\n"))
 
 # Data cleaning
 claims <- claims_raw %>%
-  # Remove the first unnamed column (row index artifact)
   select(-starts_with("unnamed")) %>%
   rename(
-    # Standardize field names based on actual column names
     department = event_department_abbreviation,
-    claim_number = claim_number,
-    paid_loss = paid_loss,
-    paid_alae = paid_alae,
-    incurred_loss = incurred_loss,
     loss_reported_date = date_of_loss_reported,
     claim_date = date_of_claim,
-    claim_status = starts_with("claim_status"),
+    claim_status = claim_status_as_of_6_10_2025,
     closed_date = date_closed,
-    dep_region = dep_region,
     claimant_name = claimant_full_name,
-    county = county,
     location_desc = event_primary_loc_desc,
-    products = products,
+    products = product_s,
     product_other = product_type_other_description
   ) %>%
   mutate(
@@ -289,9 +284,7 @@ claims <- claims_raw %>%
     # Clean DEP region
     dep_region = str_trim(dep_region)
   ) %>%
-  # Remove rows with missing claim numbers or invalid data
   filter(!is.na(claim_number) & claim_number != "") %>%
-  # Remove duplicate claims (keep first occurrence)
   distinct(claim_number, .keep_all = TRUE)
 
 cat(paste("  Cleaned records:", nrow(claims), "\n"))
@@ -314,8 +307,7 @@ print(table(claims$dep_region, useNA = "ifany"))
 data_dict <- bind_rows(data_dict, add_to_dictionary(claims, "Actuarial_UST_Individual_Claim_Data_thru_63020_4.xlsx"))
 
 # Save cleaned data
-saveRDS(claims, file.path(paths$processed, "claims_clean.rds"))
-cat("✓ Saved: data/processed/claims_clean.rds\n\n")
+save_dataset(claims, "claims_clean")
 
 # ============================================================================
 # DATASET 4: Institutional Knowledge (Text Data)
@@ -392,9 +384,9 @@ cat("========================================\n")
 cat("ETL STEP 1 COMPLETE\n")
 cat("========================================\n")
 cat("\nDatasets created:\n")
-cat(paste("  1. contracts_clean.rds:", nrow(contracts), "records\n"))
-cat(paste("  2. tanks_clean.rds:", nrow(tanks), "records\n"))
-cat(paste("  3. claims_clean.rds:", nrow(claims), "records\n"))
+cat(paste("  1. contracts_clean (.rds/.csv):", nrow(contracts), "records\n"))
+cat(paste("  2. tanks_clean (.rds/.csv):", nrow(tanks), "records\n"))
+cat(paste("  3. claims_clean (.rds/.csv):", nrow(claims), "records\n"))
 cat("  4. institutional_knowledge.rds\n")
 cat("\n")
 cat("NEXT STEPS:\n")
