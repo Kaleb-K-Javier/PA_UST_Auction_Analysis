@@ -1,198 +1,247 @@
-# PA UST Auction Analysis - Setup Guide
+# Setup Guide: PA UST Auction Analysis
 
-## Quick Start
+## Prerequisites
 
-### Step 1: Open R/RStudio
-Navigate to the project directory and open RStudio (or R).
+### Software Requirements
 
-### Step 2: Install Dependencies
+| Software | Version | Required | Notes |
+|----------|---------|----------|-------|
+| R | ≥ 4.0 | Yes | [Download](https://cran.r-project.org/) |
+| RStudio | Latest | Recommended | [Download](https://posit.co/download/rstudio-desktop/) |
+| Quarto | ≥ 1.3 | For rendering | [Download](https://quarto.org/docs/get-started/) |
+| Git | Latest | For version control | [Download](https://git-scm.com/) |
+
+### R Packages
+
+Packages are automatically installed by `00_master_script.R`. Key dependencies:
+
+**Core Analysis:**
+- `tidyverse` - Data manipulation
+- `fixest` - Fast fixed effects estimation
+- `modelsummary` - Regression tables
+- `ranger` - Random Forest
+
+**Causal Inference:**
+- `DoubleML` - Double Machine Learning
+- `mlr3` + `mlr3learners` - ML framework
+
+**Output:**
+- `gt` - Publication tables
+- `flextable` - Word/PDF tables
+- `webshot2` - HTML to PDF conversion
+
+## Step-by-Step Setup
+
+### Step 1: Clone Repository
+
+```bash
+git clone https://github.com/[username]/PA_UST_Auction_Analysis.git
+cd PA_UST_Auction_Analysis
+```
+
+Or download and extract the ZIP file.
+
+### Step 2: Add Data Files
+
+Place USTIF administrative data in `data/raw/`:
+
+```
+data/raw/
+├── Actuarial_Contract_Data_2.xlsx
+├── Actuarial_UST_Individual_Claim_Data_thru_63020_4.xlsx
+├── Tank_Construction_Closed.xlsx
+└── USTIF_Auction_Q_A.txt
+```
+
+**IMPORTANT:** Do NOT commit these files to Git (they contain confidential information).
+
+### Step 3: Open Project
+
+Open `PA_UST_Auction_Analysis.Rproj` in RStudio (if using RStudio), or set working directory:
+
+```r
+setwd("/path/to/PA_UST_Auction_Analysis")
+```
+
+### Step 4: Load Master Script
+
 ```r
 source("R/00_master_script.R")
 ```
 
 This will:
-- Install all required R packages (~20 packages)
-- Configure global settings and themes
-- Create the data dictionary template
+- Install missing packages automatically
+- Create all necessary directories
+- Load helper functions and themes
+- Print available pipeline functions
 
-### Step 3: Run ETL Pipeline
-Execute these scripts in order:
+### Step 5: Run Pipeline
+
+**Option A: Full Pipeline (Recommended)**
 
 ```r
-# Step 3a: Load and clean USTIF proprietary data
-source("R/etl/01_load_ustif_data.R")
-
-# Step 3b: (Optional) Download PA DEP external data
-source("R/etl/02_padep_acquisition.R")
-
-# Step 3c: Merge datasets into analysis panel
-source("R/etl/03_merge_master_dataset.R")
+run_all()
 ```
 
-### Step 4: Validate Data Quality
+This runs:
+1. ETL (data loading and cleaning)
+2. Validation (data quality checks)
+3. Analysis (descriptive + causal inference)
+4. Render (Quarto documents)
+
+**Option B: Step-by-Step**
+
 ```r
-source("R/validation/01_data_quality_checks.R")
+# Run individual stages
+run_etl()           # ~2 minutes
+run_validation()    # ~30 seconds
+run_analysis()      # ~5-10 minutes (DML is slowest)
+run_render()        # ~1 minute
 ```
 
-### Step 5: Run Analysis
+**Option C: Skip Slow Components**
+
 ```r
-# Descriptive statistics and visualizations
-source("R/analysis/01_descriptive_stats.R")
+# Skip causal inference (IV/DML) for faster debugging
+run_analysis(skip_causal = TRUE)
 
-# Cost correlates regression (descriptive)
-source("R/analysis/02_cost_correlates.R")
+# Skip external PA DEP data (default)
+run_etl(skip_external = TRUE)
 ```
 
-### Step 6: Render Policy Brief
-In terminal:
+## External Data Acquisition (Optional)
+
+### PA DEP Facility Data
+
+Downloads ~20K facility records from PASDA ArcGIS REST APIs:
+
+```r
+run_external()
+```
+
+Runtime: ~5-10 minutes
+
+### eFACTS Compliance Data
+
+Scrapes inspection/violation history from eFACTS web interface:
+
+```r
+run_external(run_scrape = TRUE)
+```
+
+**WARNING:** This takes **8-12 hours** for the full PA facility universe.
+
+**Recommended:** Run on a server with checkpoint/resume:
+
 ```bash
-quarto render qmd/policy_brief.qmd
+nohup Rscript R/etl/02b_efacts_scrape.R > scrape.log 2>&1 &
+
+# Monitor progress
+tail -f data/external/efacts/scrape_log.txt
 ```
 
-Or in R:
-```r
-quarto::quarto_render("qmd/policy_brief.qmd")
-```
+The scraper saves checkpoints every 100 facilities and can resume from interruptions.
 
----
+## Output Locations
 
-## File Structure
+After running the pipeline, outputs are organized as follows:
 
 ```
-PA_UST_Auction_Analysis/
-│
-├── data/
-│   ├── raw/                  # Original Excel files (DO NOT MODIFY)
-│   │   ├── Actuarial_Contract_Data_2.xlsx
-│   │   ├── Actuarial_UST_Individual_Claim_Data_thru_63020_4.xlsx
-│   │   ├── Tank_Construction_Closed.xlsx
-│   │   └── USTIF_Auction_Q_A.txt
-│   ├── processed/            # Cleaned .rds files (created by ETL)
-│   └── external/             # PA DEP downloads (optional)
-│
-├── R/
-│   ├── 00_master_script.R    # Package installation and config
-│   ├── etl/
-│   │   ├── 01_load_ustif_data.R       # Clean proprietary Excel files
-│   │   ├── 02_padep_acquisition.R     # Download PA DEP data (optional)
-│   │   └── 03_merge_master_dataset.R  # Build analysis panel
-│   ├── analysis/
-│   │   ├── 01_descriptive_stats.R     # Summary statistics & figures
-│   │   └── 02_cost_correlates.R       # Descriptive regression
-│   ├── functions/            # Reusable helper functions
-│   └── validation/
-│       └── 01_data_quality_checks.R   # Data quality assessment
-│
-├── qmd/
-│   └── policy_brief.qmd      # Main output document
-│
-├── output/
-│   ├── figures/              # Exported .png visualizations
-│   ├── tables/               # HTML/LaTeX tables
-│   └── models/               # Saved regression objects
-│
-├── literature/
-│   └── references.bib        # BibTeX citations
-│
-└── docs/                     # Supplementary documentation
+output/
+├── figures/
+│   ├── cost_density_plot.png
+│   ├── cost_density_plot.pdf
+│   ├── cost_boxplot.png
+│   ├── cost_boxplot.pdf
+│   ├── temporal_trends.png
+│   ├── temporal_trends.pdf
+│   ├── geographic_distribution.png
+│   ├── geographic_distribution.pdf
+│   ├── rf_importance.png
+│   ├── rf_importance.pdf
+│   ├── causal_estimates_plot.png
+│   ├── causal_estimates_plot.pdf
+│   ├── first_stage_plot.png
+│   ├── first_stage_plot.pdf
+│   ├── coefficient_plot.png
+│   ├── coefficient_plot.pdf
+│   ├── heterogeneity_by_era.png
+│   └── heterogeneity_by_era.pdf
+├── tables/
+│   ├── balance_table.html
+│   ├── balance_table.tex
+│   ├── balance_table.docx
+│   ├── summary_statistics.html
+│   ├── summary_statistics.tex
+│   ├── summary_statistics.pdf
+│   ├── causal_estimates.html
+│   ├── causal_estimates.tex
+│   ├── causal_estimates.pdf
+│   ├── cost_correlates_regression.html
+│   ├── cost_correlates_regression.tex
+│   ├── cost_correlates_by_era.html
+│   └── cost_correlates_by_era.tex
+└── models/
+    ├── rf_propensity_model.rds
+    ├── iv_model.rds
+    ├── dml_model.rds
+    ├── cost_correlates_models.rds
+    └── cost_correlates_by_era.rds
 ```
-
----
-
-## Data Files Description
-
-### 1. Actuarial_Contract_Data_2.xlsx
-- **Records**: 658
-- **Purpose**: Auction/bid records for USTIF contracts
-- **Key Fields**:
-  - `Contract Jobs.Claim Number`: Links to claims data
-  - `Bid Type Desc`: SOW vs. Bid-to-Result
-  - `Contract Base Price`: Original contract amount
-  - `Amount Paid to Date`: Payments made
-
-### 2. Actuarial_UST_Individual_Claim_Data_thru_63020_4.xlsx
-- **Records**: 7,793
-- **Purpose**: Individual claims payment history
-- **Key Fields**:
-  - `Claim Number`: Unique identifier
-  - `Paid Loss`: Remediation costs paid
-  - `County`: Geographic location
-  - `DEP Region`: Regulatory region
-- **Note**: Skip first 3 rows when reading (header on row 4)
-
-### 3. Tank_Construction_Closed.xlsx
-- **Records**: 6,914
-- **Purpose**: Tank-level facility data (closed tanks)
-- **Key Fields**:
-  - `PF_OTHER_ID`: Facility identifier
-  - `CAPACITY`: Tank capacity in gallons
-  - `DATE_INSTALLED`: Installation date
-  - `COMP_DESC`: Tank construction type
-
-### 4. USTIF_Auction_Q_A.txt
-- **Purpose**: Institutional knowledge about auction design
-- **Key Information**:
-  - SOW vs. Bid-to-Result differences
-  - 70% viability threshold for bids
-  - Selection criteria for auction sites
-
----
-
-## Outputs Generated
-
-After running the full pipeline, you'll have:
-
-### Data Files (data/processed/)
-- `contracts_clean.rds` - Cleaned contract data
-- `claims_clean.rds` - Cleaned claims data
-- `tanks_clean.rds` - Cleaned tank data
-- `master_analysis_dataset.rds` - Final analysis panel
-- `data_dictionary.rds` - Variable definitions
-- `validation_report.rds` - Data quality metrics
-
-### Figures (output/figures/)
-- `01_cost_distribution.png` - Histogram of remediation costs
-- `02_temporal_trends.png` - Claims and costs over time
-- `03_county_distribution.png` - Geographic distribution
-- `04_cost_by_contract_type.png` - Costs by procurement type
-- `05_coefficient_plot.png` - Regression coefficients
-- `06_heterogeneity_by_era.png` - Era-specific patterns
-
-### Tables (output/tables/)
-- `01_summary_statistics.html` - Descriptive summary
-- `02_cost_correlates_regression.html` - Regression results
-- `02_cost_correlates_regression.tex` - LaTeX version
-
-### Policy Brief (qmd/)
-- `policy_brief.pdf` or `policy_brief.html` - Final report
-
----
 
 ## Troubleshooting
 
-### "Package not found" errors
-Run `source("R/00_master_script.R")` to install missing packages.
+### Common Issues
 
-### "File not found" errors
-Ensure data files are in `data/raw/` with exact filenames.
+**1. Package Installation Failures**
 
-### Quarto rendering fails
-- Install Quarto: https://quarto.org/docs/get-started/
-- Check for LaTeX errors in the .log file
-- Try rendering to HTML first: `quarto render qmd/policy_brief.qmd --to html`
+```r
+# If automatic installation fails, try manual:
+install.packages("DoubleML", dependencies = TRUE)
+install.packages("mlr3learners")
+```
 
-### Memory issues with large data
-- Close other applications
-- Consider subsetting data for initial exploration
+**2. LaTeX/PDF Generation Errors**
 
----
+```r
+# Install TinyTeX for LaTeX rendering
+tinytex::install_tinytex()
+```
 
-## Important Notes
+**3. webshot2 PDF Errors**
 
-1. **Analysis is DESCRIPTIVE**: All findings represent correlations, not causal effects.
+```r
+# webshot2 requires Chrome/Chromium
+# Install with:
+webshot2::install_chromote()
+```
 
-2. **Selection Bias**: USTIF selects which claims go to auction. Cost differences may reflect this selection process.
+**4. "Working directory" Error**
 
-3. **Data Confidentiality**: USTIF data is proprietary. Do not share raw files publicly.
+```r
+# Ensure you're in project root
+setwd("/path/to/PA_UST_Auction_Analysis")
+# Verify:
+file.exists("R/00_master_script.R")  # Should be TRUE
+```
 
-4. **Reproducibility**: All analysis is reproducible from raw data using the scripts provided.
+**5. Memory Issues with DML**
+
+```r
+# Reduce DML folds if memory constrained
+# Edit R/analysis/03_causal_inference.R:
+# Change n_folds = 5 to n_folds = 3
+```
+
+### Getting Help
+
+1. Check error messages in console
+2. Review `data/external/efacts/scrape_log.txt` for scraping issues
+3. Contact: kalebkja@berkeley.edu
+
+## Version History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 2.0 | Dec 2024 | Multi-format output, IV/DML causal inference, PA DEP integration |
+| 1.0 | Dec 2024 | Initial descriptive analysis |

@@ -4,6 +4,7 @@
 # ============================================================================
 # Purpose: Generate comprehensive summary statistics and visualizations
 # Note: This is DESCRIPTIVE analysis - no causal claims
+# Updates: Implements multi-format output (HTML/GT & PDF/LaTeX/Kable)
 # ============================================================================
 
 cat("\n========================================\n")
@@ -16,6 +17,17 @@ library(scales)
 library(patchwork)
 library(gt)
 library(gtsummary)
+library(kableExtra) # Added for PDF/LaTeX output
+
+# Source helper functions for multi-format saving
+# (Ensure R/functions/output_helpers.R exists)
+if (file.exists("R/functions/output_helpers.R")) {
+  source("R/functions/output_helpers.R")
+} else {
+  # Fallback: simple wrappers if helper missing
+  save_figure_multi <- function(p, f, w, h) ggsave(paste0(f, ".png"), p, width=w, height=h)
+  warning("R/functions/output_helpers.R not found. Using basic PNG saving.")
+}
 
 # Load paths and theme
 if (!exists("paths")) {
@@ -79,9 +91,14 @@ fig1 <- ggplot(master, aes(x = total_cost)) +
     caption = "Source: USTIF Administrative Data"
   )
 
-ggsave(file.path(paths$figures, "01_cost_distribution.png"), 
-       fig1, width = 8, height = 5, dpi = 300)
-cat("✓ Saved: output/figures/01_cost_distribution.png\n")
+# Save Figure 1 (Multi-format)
+save_figure_multi(
+  plot = fig1, 
+  filename = "01_cost_distribution",
+  output_dir = paths$figures,
+  width = 8, 
+  height = 5
+)
 
 # ============================================================================
 # SECTION 2: Temporal Trends
@@ -131,9 +148,14 @@ fig2b <- ggplot(annual_summary, aes(x = claim_year)) +
 # Combine
 fig2 <- fig2a / fig2b
 
-ggsave(file.path(paths$figures, "02_temporal_trends.png"), 
-       fig2, width = 10, height = 8, dpi = 300)
-cat("✓ Saved: output/figures/02_temporal_trends.png\n")
+# Save Figure 2 (Multi-format)
+save_figure_multi(
+  plot = fig2, 
+  filename = "02_temporal_trends", 
+  output_dir = paths$figures,
+  width = 10, 
+  height = 8
+)
 
 # ============================================================================
 # SECTION 3: Geographic Distribution
@@ -177,9 +199,14 @@ fig3 <- ggplot(top_counties, aes(x = reorder(county, n_claims), y = n_claims)) +
   ) +
   theme(axis.text.y = element_text(size = 9))
 
-ggsave(file.path(paths$figures, "03_county_distribution.png"), 
-       fig3, width = 8, height = 6, dpi = 300)
-cat("✓ Saved: output/figures/03_county_distribution.png\n")
+# Save Figure 3 (Multi-format)
+save_figure_multi(
+  plot = fig3, 
+  filename = "03_county_distribution", 
+  output_dir = paths$figures,
+  width = 8, 
+  height = 6
+)
 
 # ============================================================================
 # SECTION 4: Contract/Auction Analysis
@@ -219,9 +246,14 @@ fig4 <- master %>%
   ) +
   theme(legend.position = "none")
 
-ggsave(file.path(paths$figures, "04_cost_by_contract_type.png"), 
-       fig4, width = 8, height = 5, dpi = 300)
-cat("✓ Saved: output/figures/04_cost_by_contract_type.png\n")
+# Save Figure 4 (Multi-format)
+save_figure_multi(
+  plot = fig4, 
+  filename = "04_cost_by_contract_type", 
+  output_dir = paths$figures,
+  width = 8, 
+  height = 5
+)
 
 # ============================================================================
 # SECTION 5: Claim Duration Analysis
@@ -260,14 +292,14 @@ cat("\nDuration by Contract Type:\n")
 print(duration_by_contract)
 
 # ============================================================================
-# SECTION 6: Summary Statistics Table (for Policy Brief)
+# SECTION 6: Summary Statistics Table (Multi-Format)
 # ============================================================================
 
 cat("\nSection 6: Generating Summary Tables\n")
 cat("--------------------------------------\n")
 
-# Create publication-ready summary table
-summary_table <- master %>%
+# Create publication-ready summary table using gtsummary
+summary_table_obj <- master %>%
   select(
     total_cost, 
     has_contract, 
@@ -296,12 +328,33 @@ summary_table <- master %>%
   modify_header(label ~ "**Variable**") %>%
   bold_labels()
 
-# Save as HTML
-summary_table %>%
+# 1. Save as HTML (Best with GT)
+html_file <- file.path(paths$tables, "01_summary_statistics.html")
+summary_table_obj %>%
   as_gt() %>%
-  gtsave(file.path(paths$tables, "01_summary_statistics.html"))
+  gtsave(html_file)
+cat(paste("✓ Saved HTML table:", html_file, "\n"))
 
-cat("✓ Saved: output/tables/01_summary_statistics.html\n")
+# 2. Save as LaTeX/PDF (Best with kableExtra)
+# NOTE: Requires LaTeX installation (TinyTeX)
+tex_file <- file.path(paths$tables, "01_summary_statistics.tex")
+pdf_file <- file.path(paths$tables, "01_summary_statistics.pdf")
+
+# Convert to kable and save LaTeX
+summary_table_obj %>%
+  as_kable_extra(booktabs = TRUE, caption = "Summary Statistics") %>%
+  kableExtra::save_kable(file = tex_file, latex_options = c("striped", "hold_position"))
+cat(paste("✓ Saved TeX table:", tex_file, "\n"))
+
+# Try to compile PDF (if system has LaTeX)
+tryCatch({
+  summary_table_obj %>%
+    as_kable_extra(booktabs = TRUE, caption = "Summary Statistics") %>%
+    kableExtra::save_kable(file = pdf_file, latex_options = c("striped", "hold_position"))
+  cat(paste("✓ Saved PDF table:", pdf_file, "\n"))
+}, error = function(e) {
+  cat("! PDF generation failed (LaTeX missing or error). See .tex file instead.\n")
+})
 
 # ============================================================================
 # SECTION 7: Export Results
@@ -337,8 +390,8 @@ cat(paste("  • Claims procured via auction:", sum(master$is_auction),
           "(", round(mean(master$is_auction) * 100, 1), "%)\n"))
 cat("\n")
 cat("Outputs:\n")
-cat("  • Figures saved to: output/figures/\n")
-cat("  • Tables saved to: output/tables/\n")
+cat("  • Figures saved to: output/figures/ (PNG + PDF)\n")
+cat("  • Tables saved to: output/tables/ (HTML + TeX + PDF)\n")
 cat("  • Results saved to: data/processed/descriptive_results.rds\n")
 cat("\n")
 cat("NEXT STEP:\n")

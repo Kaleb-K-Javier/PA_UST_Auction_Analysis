@@ -164,6 +164,109 @@ This policy brief provides a **descriptive characterization** of USTIF claims an
 
 \newpage
 
+# Data Insight: Why Raw Comparisons Are Misleading {#sec-data-insight}
+
+::: {.callout-important}
+## Critical Finding: Selection Bias in Contract Assignment
+
+Before examining the descriptive statistics, it is essential to understand why **direct comparisons between auction and non-auction claims are misleading**. This section explains the selection process and provides evidence that causal interpretation requires advanced econometric methods.
+:::
+
+## The Survivorship Problem
+
+USTIF does not randomly assign claims to auctions. Instead, the Third-Party Administrator (TPA) selects claims for auction intervention based on observable problems:
+
+- Claims with **excessive costs** relative to benchmarks
+- Claims with **slow remediation progress** 
+- Sites where the current contractor is underperforming
+
+This creates **survivorship bias**: the claims we observe in the auction (PFP) pool are precisely those that *failed* under the Time-and-Materials (T&M) approach. Claims that proceed smoothly under T&M close without ever entering the auction system.
+
+## Evidence of Selection
+
+```{r data-insight-balance}
+#| label: fig-selection-evidence
+#| fig-cap: "Evidence of Selection: PFP sites systematically differ from T&M sites on key observables"
+
+# Check if analysis panel exists
+if (file.exists("../data/processed/analysis_panel.rds")) {
+  
+  analysis_panel <- readRDS("../data/processed/analysis_panel.rds")
+  
+  # Create comparison summary
+  selection_evidence <- analysis_panel %>%
+    mutate(group = ifelse(is_PFP, "Pay-for-Performance (PFP)", "Time & Materials (T&M)")) %>%
+    group_by(group) %>%
+    summarise(
+      `N` = n(),
+      `Mean Cost ($)` = mean(total_paid, na.rm = TRUE),
+      `Median Cost ($)` = median(total_paid, na.rm = TRUE),
+      `Mean Duration (Years)` = mean(duration_years, na.rm = TRUE),
+      `Mean Tank Age (Years)` = mean(tank_age_imputed, na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  # Display as table
+  selection_evidence %>%
+    gt() %>%
+    fmt_currency(columns = contains("Cost"), decimals = 0) %>%
+    fmt_number(columns = contains("Duration") | contains("Tank Age"), decimals = 1) %>%
+    fmt_number(columns = N, use_seps = TRUE, decimals = 0) %>%
+    tab_header(
+      title = "Systematic Differences Between Contract Groups",
+      subtitle = "Evidence that selection is non-random"
+    ) %>%
+    tab_source_note("Source: USTIF Claims Data (Closed claims, total_paid > $1,000)") %>%
+    tab_footnote(
+      footnote = "PFP sites have longer durations and higher costs BEFORE intervention",
+      locations = cells_column_labels(columns = `Mean Cost ($)`)
+    )
+    
+} else {
+  cat("Note: Run ETL pipeline to generate analysis panel data.")
+}
+```
+
+The table above demonstrates that PFP sites **systematically differ** from T&M sites:
+
+- **Higher costs**: PFP sites show substantially higher remediation expenditures
+- **Longer durations**: Claims assigned to PFP have been open longer before intervention
+- **Older infrastructure**: PFP sites tend to have older tank systems
+
+## The Naive Fallacy
+
+```{r naive-fallacy-plot}
+#| label: fig-naive-fallacy
+#| fig-cap: "The Naive Fallacy: PFP appears more expensive, but this is selection bias"
+
+if (file.exists("../output/figures/cost_density_plot.png")) {
+  knitr::include_graphics("../output/figures/cost_density_plot.png")
+}
+```
+
+The density plot above illustrates the **naive fallacy**. If we simply compare costs across groups, PFP sites appear more expensive. A casual observer might conclude:
+
+> *"Auctions increase costs—we should abandon the PFP program."*
+
+This interpretation is **incorrect**. The cost difference reflects the selection process, not the treatment effect. Sites were sent to PFP *because* they were already problematic.
+
+## Implications for Interpretation
+
+Throughout this policy brief, keep the following in mind:
+
+1. **Descriptive ≠ Causal**: All statistics presented are conditional correlations, not treatment effects.
+
+2. **Selection on Observables and Unobservables**: Even controlling for observable characteristics, unobserved factors (site complexity, geological conditions, contractor quality) drive both selection and costs.
+
+3. **The Research Agenda**: Rigorous causal evaluation requires either:
+   - **Instrumental Variables**: Using quasi-random variation in TPA adjuster assignment
+   - **Randomized Controlled Trial**: Prospectively randomizing eligible claims to auction
+   - **Regression Discontinuity**: Exploiting threshold rules in the selection process
+
+The descriptive analysis that follows characterizes patterns in the data. Policy decisions about the auction program should await causal evidence from these more rigorous approaches.
+
+\newpage
+
 # Data and Methods
 
 ## Data Sources

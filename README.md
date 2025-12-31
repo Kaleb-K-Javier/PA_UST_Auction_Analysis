@@ -1,77 +1,168 @@
-# Pennsylvania UST Claims Auction Analysis
+# Pennsylvania UST Auction Analysis
 
-## Project Overview
+**Causal Inference Analysis of Pay-for-Performance Auctions in Environmental Remediation**
 
-This repository contains a descriptive and exploratory analysis of auction-based cost control mechanisms in underground storage tank (UST) remediation claims administered by Pennsylvania's Underground Storage Tank Indemnification Fund (USTIF).
+[![R Version](https://img.shields.io/badge/R-%3E%3D4.0-blue)](https://www.r-project.org/)
+[![License](https://img.shields.io/badge/License-MIT-green)]()
 
-**Analysis Scope**: Descriptive characterization of cost distributions, temporal trends, and correlates. This analysis does NOT deploy causal inference designs—observed correlations should not be interpreted as causal effects.
+## Overview
 
-## Quick Start
+This repository contains the complete analytical pipeline for evaluating Pennsylvania's Underground Storage Tank Indemnification Fund (USTIF) auction procurement program. The analysis examines whether Pay-for-Performance (PFP) auctions reduce remediation costs compared to Time-and-Materials (T&M) contracts, using instrumental variables (IV) and double machine learning (DML) to correct for selection bias.
 
-```r
-# 1. Install dependencies
-source("R/00_master_script.R")
+## Key Research Question
 
-# 2. Run ETL pipeline
-source("R/etl/01_load_ustif_data.R")
-source("R/etl/03_merge_master_dataset.R")
-
-# 3. Run analysis
-source("R/analysis/01_descriptive_stats.R")
-source("R/analysis/02_cost_correlates.R")
-
-# 4. Render policy brief
-quarto::quarto_render("qmd/policy_brief.qmd")
-```
-
-See [SETUP_GUIDE.md](SETUP_GUIDE.md) for detailed instructions.
-
-## Data Sources
-
-| Dataset | Records | Description |
-|---------|---------|-------------|
-| Contract Data | 658 | Auction participation and bid records |
-| Claims Data | 7,793 | Individual claims payment history (1994-2020) |
-| Tank Data | 6,914 | Facility and tank characteristics |
-
-## Key Outputs
-
-- **Policy Brief** (`qmd/policy_brief.qmd`): Executive summary and findings for non-technical stakeholders
-- **Figures** (`output/figures/`): Visualizations of cost distributions, trends, and correlates
-- **Tables** (`output/tables/`): Summary statistics and regression results
+> At what point in a cleanup's lifecycle should USTIF intervene with an auction to minimize total social cost?
 
 ## Repository Structure
 
 ```
-├── data/raw/           # Original USTIF Excel files
-├── data/processed/     # Cleaned analysis datasets
-├── R/etl/              # Data loading and cleaning scripts
-├── R/analysis/         # Statistical analysis scripts
-├── R/validation/       # Data quality checks
-├── qmd/                # Quarto policy brief
-├── output/             # Figures, tables, models
-└── literature/         # BibTeX references
+PA_UST_Auction_Analysis/
+├── R/
+│   ├── 00_master_script.R          # Central orchestration
+│   ├── analysis/
+│   │   ├── 01_descriptive_stats.R  # Selection bias visualization
+│   │   ├── 02_cost_correlates.R    # Descriptive regressions
+│   │   └── 03_causal_inference.R   # IV, DML estimation
+│   ├── etl/
+│   │   ├── 01_load_ustif_data.R    # Load USTIF Excel files
+│   │   ├── 02a_padep_download.R    # PA DEP ArcGIS bulk download
+│   │   ├── 02b_efacts_scrape.R     # eFACTS compliance scraper
+│   │   ├── 03_merge_master_dataset.R
+│   │   └── 04_construct_analysis_panel.R
+│   ├── functions/
+│   │   └── output_helpers.R        # Multi-format save utilities
+│   └── validation/
+│       └── 01_data_quality_checks.R
+├── data/
+│   ├── raw/                        # USTIF Excel files (DO NOT COMMIT)
+│   ├── processed/                  # Cleaned datasets
+│   └── external/
+│       ├── padep/                  # PA DEP facility data
+│       └── efacts/                 # eFACTS compliance data
+├── output/
+│   ├── figures/                    # PNG + PDF
+│   ├── tables/                     # HTML + LaTeX + PDF
+│   └── models/                     # RDS model objects
+├── qmd/
+│   ├── policy_brief.qmd
+│   └── research_proposal.qmd
+├── literature/
+│   └── references.bib
+└── docs/
 ```
 
-## Methodology
+## Quick Start
 
-The analysis employs:
-1. **Summary Statistics**: Measures of central tendency and dispersion
-2. **Visualization**: Histograms, box plots, trend lines
-3. **Descriptive Regression**: Fixed effects models characterizing conditional correlations
+### 1. Clone and Setup
 
-**Important Caveat**: All regression results are descriptive. Selection into auction procurement is endogenous, so coefficients represent conditional correlations, not causal effects.
+```bash
+git clone https://github.com/[username]/PA_UST_Auction_Analysis.git
+cd PA_UST_Auction_Analysis
+```
 
-## Requirements
+### 2. Install Dependencies
 
-- R ≥ 4.0
-- Quarto (for rendering policy brief)
-- R packages: tidyverse, fixest, modelsummary, gt, gtsummary, readxl, lubridate
+```r
+# In R console
+install.packages("pacman")
+source("R/00_master_script.R")  # Auto-installs all dependencies
+```
+
+### 3. Add Data Files
+
+Place the following in `data/raw/`:
+- `Actuarial_Contract_Data_2.xlsx`
+- `Actuarial_UST_Individual_Claim_Data_thru_63020_4.xlsx`
+- `Tank_Construction_Closed.xlsx`
+- `USTIF_Auction_Q_A.txt`
+
+### 4. Run Pipeline
+
+```r
+source("R/00_master_script.R")
+
+# Option A: Full pipeline (recommended)
+run_all()
+
+# Option B: Step-by-step
+run_etl()           # Data loading and cleaning
+run_validation()    # Data quality checks
+run_analysis()      # Descriptive + causal inference
+run_render()        # Quarto documents
+```
+
+## Output Formats
+
+All figures and tables are saved in multiple formats for flexibility:
+
+| Type | Formats | Location |
+|------|---------|----------|
+| Figures | `.png`, `.pdf` | `output/figures/` |
+| Tables | `.html`, `.tex`, `.pdf` | `output/tables/` |
+| Models | `.rds` | `output/models/` |
+
+## Identification Strategy
+
+### The Selection Problem
+
+Sites assigned to PFP auctions are **not randomly selected**. USTIF selects "problem" sites—those with cost overruns or technical stagnation under T&M. Naive cost comparisons conflate the **treatment effect** with the **selection effect**.
+
+### Solution: Instrumental Variables
+
+We exploit quasi-random variation in TPA adjuster assignment. Different adjusters have different propensities to use PFP ("hawks" vs. "doves"). The leave-one-out leniency measure instruments for treatment:
+
+```
+Z_i = (1/(N_j - 1)) × Σ_{k≠i} 1[PFP_k = 1]
+```
+
+### Robustness: Double Machine Learning
+
+Under conditional ignorability given rich observables, DML uses Random Forest to flexibly partial out confounders while maintaining valid inference on the treatment effect.
+
+## Key Outputs
+
+| Output | Description |
+|--------|-------------|
+| `cost_density_plot` | Survivorship bias visualization |
+| `balance_table` | Covariate imbalance evidence |
+| `rf_importance` | "Tacit Rule" - what drives PFP assignment |
+| `causal_estimates` | IV vs. DML treatment effect comparison |
+| `first_stage_plot` | Instrument strength diagnostic |
+
+## External Data Acquisition
+
+### PA DEP Data (Automatic)
+
+```r
+run_external()  # Downloads from PASDA ArcGIS REST APIs
+```
+
+### eFACTS Compliance Data (Manual/Long-Running)
+
+```bash
+# Run on server (8-12 hours for full PA universe)
+nohup Rscript R/etl/02b_efacts_scrape.R > scrape.log 2>&1 &
+```
+
+Features checkpoint/resume for interruptions.
+
+## Citation
+
+```bibtex
+@misc{javier2025ustif,
+  author = {Javier, Kaleb K.},
+  title = {Optimal Intervention in Environmental Remediation},
+  year = {2025},
+  institution = {UC Berkeley, Department of Agricultural and Resource Economics}
+}
+```
 
 ## License
 
-[To be specified]
+MIT License. See `LICENSE` for details.
 
 ## Contact
 
-[Your Name] - [your.email@institution.edu]
+Kaleb K. Javier  
+kalebkja@berkeley.edu  
+UC Berkeley, Agricultural and Resource Economics

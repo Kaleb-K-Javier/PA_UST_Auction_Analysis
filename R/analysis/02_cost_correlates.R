@@ -8,6 +8,8 @@
 # This analysis is DESCRIPTIVE and EXPLORATORY. The regression models document
 # conditional correlations - they should NOT be interpreted as causal effects.
 # Selection into auction vs. non-auction procurement is endogenous.
+#
+# Updates: Implements multi-format output (HTML, LaTeX, PDF, PNG)
 # ============================================================================
 
 cat("\n========================================\n")
@@ -20,6 +22,17 @@ library(fixest)
 library(modelsummary)
 library(scales)
 library(patchwork)
+library(kableExtra) # For PDF table generation
+
+# Source helper functions for multi-format saving
+# (Ensure R/functions/output_helpers.R exists)
+if (file.exists("R/functions/output_helpers.R")) {
+  source("R/functions/output_helpers.R")
+} else {
+  # Fallback: simple wrappers if helper missing
+  save_figure_multi <- function(p, f, w, h) ggsave(paste0(f, ".png"), p, width=w, height=h)
+  warning("R/functions/output_helpers.R not found. Using basic PNG saving.")
+}
 
 # Load paths
 if (!exists("paths")) {
@@ -179,7 +192,7 @@ model5 <- feols(
 )
 
 # ============================================================================
-# SECTION 4: Regression Table Output
+# SECTION 4: Regression Table Output (Multi-Format)
 # ============================================================================
 
 cat("\nSection 4: Regression Results Table\n")
@@ -197,7 +210,7 @@ coef_map <- c(
   "(Intercept)" = "Constant"
 )
 
-# Generate regression table
+# Generate regression table list
 models_list <- list(
   "(1)" = model1,
   "(2)" = model2,
@@ -206,39 +219,56 @@ models_list <- list(
   "(5)" = model5
 )
 
-# Summary table with modelsummary
-reg_table <- modelsummary(
-  models_list,
-  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
-  coef_map = coef_map,
-  gof_map = c("nobs", "r.squared", "adj.r.squared"),
-  title = "Correlates of Remediation Costs (Descriptive)",
-  notes = c(
-    "Dependent variable: Log(Total Cost)",
-    "Reference category: No Contract",
-    "Heteroskedasticity-robust standard errors in parentheses",
-    "*** p < 0.01, ** p < 0.05, * p < 0.1",
-    "NOTE: Coefficients represent conditional correlations, NOT causal effects"
-  ),
-  output = "gt"
+# Common notes
+table_notes <- c(
+  "Dependent variable: Log(Total Cost)",
+  "Reference category: No Contract",
+  "Heteroskedasticity-robust standard errors in parentheses",
+  "*** p < 0.01, ** p < 0.05, * p < 0.1",
+  "NOTE: Coefficients represent conditional correlations, NOT causal effects"
 )
 
-# Save table
-gtsave(reg_table, file.path(paths$tables, "02_cost_correlates_regression.html"))
-cat("✓ Saved: output/tables/02_cost_correlates_regression.html\n")
-
-# Also save as LaTeX for technical appendix
+# 1. Save HTML (Best for viewing)
 modelsummary(
   models_list,
   stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
   coef_map = coef_map,
   gof_map = c("nobs", "r.squared", "adj.r.squared"),
+  title = "Correlates of Remediation Costs (Descriptive)",
+  notes = table_notes,
+  output = file.path(paths$tables, "02_cost_correlates_regression.html")
+)
+cat("✓ Saved: output/tables/02_cost_correlates_regression.html\n")
+
+# 2. Save LaTeX (For academic appendix)
+modelsummary(
+  models_list,
+  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
+  coef_map = coef_map,
+  gof_map = c("nobs", "r.squared", "adj.r.squared"),
+  title = "Correlates of Remediation Costs (Descriptive)",
   output = file.path(paths$tables, "02_cost_correlates_regression.tex")
 )
 cat("✓ Saved: output/tables/02_cost_correlates_regression.tex\n")
 
+# 3. Save PDF (Optional - requires TinyTeX)
+# modelsummary can output PDF directly via kableExtra
+tryCatch({
+  modelsummary(
+    models_list,
+    stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
+    coef_map = coef_map,
+    gof_map = c("nobs", "r.squared", "adj.r.squared"),
+    title = "Correlates of Remediation Costs (Descriptive)",
+    output = file.path(paths$tables, "02_cost_correlates_regression.pdf")
+  )
+  cat("✓ Saved: output/tables/02_cost_correlates_regression.pdf\n")
+}, error = function(e) {
+  cat("! PDF Table generation failed (LaTeX/TinyTeX missing). See .tex file.\n")
+})
+
 # Print to console
-cat("\nRegression Results:\n")
+cat("\nRegression Results (Console View):\n")
 etable(model1, model2, model3, model4, model5,
        headers = c("Baseline", "+ Year FE", "+ County FE", "+ Region FE", "Era Specification"))
 
@@ -274,9 +304,14 @@ fig_coef <- ggplot(coef_data, aes(x = reorder(term_clean, estimate), y = estimat
     caption = "Note: 95% confidence intervals shown. These are descriptive correlations, not causal effects."
   )
 
-ggsave(file.path(paths$figures, "05_coefficient_plot.png"), 
-       fig_coef, width = 8, height = 4, dpi = 300)
-cat("✓ Saved: output/figures/05_coefficient_plot.png\n")
+# Save Figure 5 (Multi-format)
+save_figure_multi(
+  plot = fig_coef,
+  filename = "05_coefficient_plot",
+  output_dir = paths$figures,
+  width = 8,
+  height = 4
+)
 
 # ============================================================================
 # SECTION 6: Heterogeneity Exploration
@@ -301,9 +336,14 @@ fig_hetero <- analysis_data %>%
   ) +
   theme(legend.position = "bottom")
 
-ggsave(file.path(paths$figures, "06_heterogeneity_by_era.png"), 
-       fig_hetero, width = 10, height = 6, dpi = 300)
-cat("✓ Saved: output/figures/06_heterogeneity_by_era.png\n")
+# Save Figure 6 (Multi-format)
+save_figure_multi(
+  plot = fig_hetero,
+  filename = "06_heterogeneity_by_era",
+  output_dir = paths$figures,
+  width = 10,
+  height = 6
+)
 
 # Era-specific correlations
 cat("\nContract Type Correlations by Era:\n")
@@ -385,10 +425,8 @@ cat(paste("  • Bid-to-Result:", round(key_coefs["contract_typeBid-to-Result"],
           "(", round(exp(key_coefs["contract_typeBid-to-Result"]), 2), "x in levels)\n"))
 cat("\n")
 cat("Outputs:\n")
-cat("  • Figures: output/figures/05_coefficient_plot.png\n")
-cat("  • Figures: output/figures/06_heterogeneity_by_era.png\n")
-cat("  • Tables: output/tables/02_cost_correlates_regression.html\n")
-cat("  • Tables: output/tables/02_cost_correlates_regression.tex\n")
+cat("  • Figures: output/figures/ (PNG + PDF)\n")
+cat("  • Tables: output/tables/ (HTML + TeX + PDF)\n")
 cat("  • Models: output/models/cost_correlates_models.rds\n")
 cat("\n")
 cat("NEXT STEP:\n")
