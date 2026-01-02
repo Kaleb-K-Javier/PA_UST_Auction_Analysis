@@ -1,750 +1,634 @@
-# R/etl/02b_efacts_scrape.R
+# R/etl/02b_efacts_scrape_v21_cleaning_fix.R
 # ============================================================================
-# Pennsylvania UST Analysis - ETL Step 2b: eFACTS Compliance Data Scraping
+# Pennsylvania UST Analysis - ETL Step 2b: eFACTS Scraper v21 (Clean & Split)
 # ============================================================================
-# Location: PA_UST_Auction_Analysis/R/etl/02b_efacts_scrape.R
-# Purpose: Scrape inspection history, violations, and penalties from eFACTS
-# Runtime: ~8-12 hours for full PA universe (~20K facilities)
-# Features: Checkpoint/resume capability for long-running server execution
-# ============================================================================
-# WORKING DIRECTORY: Run from project root (PA_UST_Auction_Analysis/)
-#   Rscript R/etl/02b_efacts_scrape.R
-#   OR: nohup Rscript R/etl/02b_efacts_scrape.R > scrape.log 2>&1 &
-# ============================================================================
-# PREREQUISITE: Run 02a_padep_download.R first to create linkage table
-# ============================================================================
-# Data Collected:
-#   - Facility inspection history (FOI inspections, compliance evaluations)
-#   - Violation records and details
-#   - Tank remediation/release incidents
-#   - Permit/authorization history
-# ============================================================================
-# IMPORTANT: This script scrapes ALL PA facilities to avoid selection bias
-# in downstream causal analysis. Do NOT filter to USTIF claims only.
+# Purpose: Scrape Everything + FIX ID SPLITTING + REMOVE GHOST ROWS
+# Fixes:
+#   1. Inspections: Explicitly splits "Type (ID)" into two separate columns.
+#   2. Permit Tasks: Filters out nested-table artifacts (ghost rows).
+#   3. Schema: Updated to include _clean and _id columns for all tables.
 # ============================================================================
 
 cat("\n")
 cat("╔══════════════════════════════════════════════════════════════════════╗\n")
-cat("║  ETL Step 2b: eFACTS Compliance Data Scraping                       ║\n")
-cat("║  Checkpoint-enabled for long-running server execution               ║\n")
+cat("║  ETL Step 2b: eFACTS Scraper v21 (Cleaning & De-Duplication)        ║\n")
+cat("║  Status: Fixing Inspection IDs and Permit Task Ghost Rows           ║\n")
 cat("╚══════════════════════════════════════════════════════════════════════╝\n\n")
 
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
-
-CONFIG <- list(
-  # Scraping behavior
-  delay_seconds = 1.5,           # Delay between facility requests (be respectful)
-  delay_violation = 0.75,        # Delay for violation detail pages
-  batch_size = 100,              # Save checkpoint every N facilities
-  max_retries = 3,               # Retries per failed request
-  timeout_seconds = 30,          # HTTP timeout
-  
-  # Paths (relative to project root: PA_UST_Auction_Analysis/)
-  padep_dir = "data/external/padep",
-  efacts_dir = "data/external/efacts",
-  checkpoint_file = "data/external/efacts/scrape_checkpoint.rds",
-  
-  # Output files (saved to efacts_dir)
-  output_inspections = "efacts_inspections.rds",
-  output_violations = "efacts_violations.rds",
-  output_remediation = "efacts_remediation.rds",
-  output_permits = "efacts_permits.rds",
-  output_errors = "efacts_scrape_errors.rds",
-  output_coverage = "efacts_facility_coverage.rds"  # Missingness tracking
-)
-
-# ============================================================================
-# SETUP
-# ============================================================================
-
-# Validate working directory (should be project root)
-if (!file.exists("R/etl") && !file.exists("data/processed")) {
-  stop(paste0(
-    "Working directory does not appear to be the project root.\n",
-    "Current directory: ", getwd(), "\n",
-    "Expected: PA_UST_Auction_Analysis/\n",
-    "Please setwd() to project root or open the .Rproj file in RStudio."
-  ))
-}
-
 suppressPackageStartupMessages({
-  library(tidyverse)
+  library(data.table)
   library(httr)
   library(rvest)
   library(janitor)
+  library(stringr)
 })
 
-# Create directories
-if (!dir.exists(CONFIG$efacts_dir)) {
-  dir.create(CONFIG$efacts_dir, recursive = TRUE)
+# ============================================================================
+# 1. CONFIGURATION & SCHEMA DEFINITIONS
+# ============================================================================
+
+CONFIG <- list(
+  delay_facility = 1.0,
+  delay_detail = 0.5,
+  batch_size = 50,
+  timeout = 30,
+  scrape_violations = TRUE,
+  scrape_permit_details = TRUE,
+  scrape_remediation_details = TRUE,
+  efacts_dir = "data/external/efacts",
+  checkpoint_file = "data/external/efacts/scrape_checkpoint_v21.rds"
+)
+
+if (!dir.exists(CONFIG$efacts_dir)) dir.create(CONFIG$efacts_dir, recursive = TRUE)
+
+# --- STRICT SCHEMA DEFINITIONS (UPDATED) ---
+SCHEMAS <- list(
+  # 1. Facility Metadata
+  meta = data.table(
+    efacts_facility_id = character(), facility_name = character(), 
+    address = character(), status = character(), program = character(), 
+    facility_id = character()
+  ),
+  
+  # 2. Tanks
+  tanks = data.table(
+    efacts_facility_id = character(), tank_internal_id = character(),
+    sub_facility_name = character(), type = character(), 
+    other_id = character(), status = character(), e_map_pa_location = character()
+  ),
+  
+  # 3. Inspections (UPDATED SCHEMA)
+  inspections = data.table(
+    efacts_facility_id = character(), 
+    inspection_id = character(),          # Extracted ID (PK)
+    inspection_type_clean = character(),  # Clean Name
+    inspection_type_raw = character(),    # Original "Name (ID)"
+    inspection_date = character(), result = character()
+  ),
+  
+  # 4. Violations
+  violations = data.table(
+    efacts_facility_id = character(), inspection_id = character(),
+    violation_id = character(), violation_date = character(),
+    description = character(), resolution = character(),
+    citation = character(), violation_type = character(),
+    enforcement_id = character(), enf_type = character(),
+    penalty_assessed = character(), penalty_collected = character(),
+    date_executed = character(), penalty_final_date = character(),
+    total_amount_due = character(), taken_against = character(),
+    on_appeal = character(), penalty_status = character(),
+    enforcement_status = character(), num_violations_addressed = character()
+  ),
+  
+  # 5. Remediation (Summary)
+  rem_summary = data.table(
+    efacts_facility_id = character(), lrpact_id = character(),
+    incident_name = character(), confirmed_release_date = character(),
+    type = character(), cleanup_status = character(), cleanup_status_date = character()
+  ),
+  
+  # 6. Remediation Substances
+  rem_sub = data.table(
+    efacts_facility_id = character(), lrpact_id = character(), substance_internal_id = character(),
+    incident_name = character(), confirmed_release_date = character(),
+    incident_id = character(), incident_type = character(),
+    cleanup_status = character(), cleanup_status_date = character(),
+    substance_released = character(), environmental_impact = character()
+  ),
+  
+  # 7. Remediation Milestones
+  rem_mil = data.table(
+    efacts_facility_id = character(), lrpact_id = character(), milestone_internal_id = character(),
+    milestone_name = character(), milestone_event_date = character(),
+    milestone_due_date = character(), i_milestone_status = character(),
+    milestone_response_date = character()
+  ),
+  
+  # 8. Permits Detail
+  perm_det = data.table(
+    efacts_facility_id = character(), auth_id = character(),
+    permit_number = character(), site = character(), client = character(),
+    authorization_type = character(), application_type = character(),
+    authorization_is_for = character(), date_received = character(), status = character()
+  ),
+  
+  # 9. Permit Tasks (UPDATED SCHEMA - Removed junk columns)
+  perm_tasks = data.table(
+    efacts_facility_id = character(), auth_id = character(), task_internal_id = character(),
+    task = character(), start_date = character(), target_date = character(), completion_date = character()
+  ),
+  
+  # 10. Coverage & Errors
+  cov = data.table(
+    efacts_facility_id = character(), found_meta = logical(),
+    n_tanks = integer(), n_inspections = integer(), 
+    n_violations = integer(), n_permits = integer(),
+    status = character(), scraped_at = character()
+  ),
+  
+  err = data.table(
+    efacts_facility_id = character(), error_msg = character(), time = character()
+  )
+)
+
+# Helper: Create empty row
+get_template <- function(schema_name) {
+  copy(SCHEMAS[[schema_name]])
 }
 
-# Logging with timestamps
+# Helper: Coerce scraped DT to match Schema
+enforce_schema <- function(dt, schema_name) {
+  if (is.null(dt) || nrow(dt) == 0) return(get_template(schema_name))
+  
+  target <- SCHEMAS[[schema_name]]
+  target_cols <- names(target)
+  
+  # Add missing cols as NA
+  missing_cols <- setdiff(target_cols, names(dt))
+  if (length(missing_cols) > 0) dt[, (missing_cols) := NA_character_]
+  
+  # Select and order
+  dt <- dt[, ..target_cols]
+  
+  # Force char types (except coverage ints)
+  if (schema_name != "cov") dt[, (target_cols) := lapply(.SD, as.character)]
+  
+  return(dt)
+}
+
+# ============================================================================
+# 2. LOGGING
+# ============================================================================
+
 log_msg <- function(msg, level = "INFO") {
   timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-  message <- sprintf("[%s] %s: %s", timestamp, level, msg)
-  cat(message, "\n")
-  
-  # Also append to log file
-
-  log_file <- file.path(CONFIG$efacts_dir, "scrape_log.txt")
-  cat(message, "\n", file = log_file, append = TRUE)
+  cat(sprintf("[%s] %s: %s\n", format(Sys.time(), "%H:%M:%S"), level, msg))
+  write(sprintf("[%s] %s: %s", timestamp, level, msg),
+        file = file.path(CONFIG$efacts_dir, "scrape_log.txt"), append = TRUE)
 }
 
 # ============================================================================
-# SECTION 1: LOAD FACILITY UNIVERSE
+# 3. PARSING HELPERS (Raw)
 # ============================================================================
 
-log_msg("Loading facility universe from 02a downloads...")
-
-linkage_path <- file.path(CONFIG$padep_dir, "facility_linkage_table.rds")
-
-if (!file.exists(linkage_path)) {
-  stop(paste0(
-    "Facility linkage table not found at: ", linkage_path, "\n",
-    "Run 02a_padep_download.R first to create the linkage table."
-  ))
-}
-
-linkage <- readRDS(linkage_path)
-
-# ============================================================================
-# VALIDATE LINKAGE TABLE STRUCTURE
-# ============================================================================
-
-# Check required columns exist
-required_cols <- c("efacts_facility_id", "permit_number", "registration_status")
-missing_cols <- setdiff(required_cols, names(linkage))
-
-if (length(missing_cols) > 0) {
-
-  stop(paste0(
-    "Linkage table missing required columns: ", paste(missing_cols, collapse = ", "), "\n",
-    "Available columns: ", paste(names(linkage), collapse = ", "), "\n",
-    "Re-run 02a_padep_download.R to regenerate the linkage table."
-  ))
-}
-
-# Check efacts_facility_id is not all NA
-if (all(is.na(linkage$efacts_facility_id))) {
-  stop(paste0(
-    "All efacts_facility_id values are NA in linkage table.\n",
-    "This suggests the PASDA data didn't contain PRIMARY_FA field.\n",
-    "Check 02a download logs and verify ArcGIS endpoints."
-  ))
-}
-
-# Extract unique eFACTS facility IDs (PRIMARY_FA)
-# Convert to character for consistent handling (checkpoint stores as character)
-facility_ids <- linkage %>%
-  filter(!is.na(efacts_facility_id)) %>%
-  pull(efacts_facility_id) %>%
-  as.character() %>%  # Ensure character type for checkpoint compatibility
-  unique() %>%
-  sort()
-
-log_msg(sprintf("Found %d unique eFACTS facility IDs to scrape", length(facility_ids)))
-log_msg(sprintf("  Active facilities: %d", sum(linkage$registration_status == "active", na.rm = TRUE)))
-log_msg(sprintf("  Inactive facilities: %d", sum(linkage$registration_status == "inactive", na.rm = TRUE)))
-
-# ============================================================================
-# SECTION 2: CHECKPOINT MANAGEMENT
-# ============================================================================
-
-#' Load or initialize checkpoint state
-load_checkpoint <- function() {
-  if (file.exists(CONFIG$checkpoint_file)) {
-    checkpoint <- readRDS(CONFIG$checkpoint_file)
-    log_msg(sprintf("Resuming from checkpoint: %d/%d facilities completed",
-                    checkpoint$completed_count, checkpoint$total_count))
-    return(checkpoint)
-  } else {
-    log_msg("Starting fresh scrape (no checkpoint found)")
-    return(list(
-      completed_ids = character(0),
-      completed_count = 0,
-      total_count = length(facility_ids),
-      started_at = Sys.time(),
-      last_save = Sys.time()
-    ))
-  }
-}
-
-#' Save checkpoint state
-save_checkpoint <- function(checkpoint) {
-  checkpoint$last_save <- Sys.time()
-  saveRDS(checkpoint, CONFIG$checkpoint_file)
-}
-
-#' Save accumulated data to disk (RDS + CSV)
-save_accumulated_data <- function(data_list, checkpoint) {
-  
-
-  # Helper to append or create (saves both RDS and CSV)
-  save_or_append <- function(new_data, filename) {
-    if (length(new_data) == 0) return(0)
-    
-    filepath_rds <- file.path(CONFIG$efacts_dir, filename)
-    filepath_csv <- str_replace(filepath_rds, "\\.rds$", ".csv")
-    new_df <- bind_rows(new_data)
-    
-    if (nrow(new_df) == 0) return(0)
-    
-    if (file.exists(filepath_rds)) {
-      existing <- readRDS(filepath_rds)
-      combined <- bind_rows(existing, new_df)
-      saveRDS(combined, filepath_rds)
-      write_csv(combined, filepath_csv, na = "")
-      return(nrow(new_df))
-    } else {
-      saveRDS(new_df, filepath_rds)
-      write_csv(new_df, filepath_csv, na = "")
-      return(nrow(new_df))
+parse_table_raw <- function(node) {
+  if (is.na(node) || is.null(node)) return(NULL)
+  tryCatch({
+    tbl <- html_table(node, fill = TRUE)
+    if (nrow(tbl) == 0) return(NULL)
+    if (nrow(tbl) == 1 && grepl("No records matched", as.character(tbl[1,1]), ignore.case=TRUE)) return(NULL)
+    if (all(grepl("^(X|Var)\\d+$", names(tbl), ignore.case=TRUE)) && nrow(tbl) > 1) {
+      names(tbl) <- as.character(tbl[1,])
+      tbl <- tbl[-1,]
     }
-  }
-  
-  n_insp <- save_or_append(data_list$inspections, CONFIG$output_inspections)
-  n_viol <- save_or_append(data_list$violations, CONFIG$output_violations)
-  n_remed <- save_or_append(data_list$remediation, CONFIG$output_remediation)
-  n_perm <- save_or_append(data_list$permits, CONFIG$output_permits)
-  n_err <- save_or_append(data_list$errors, CONFIG$output_errors)
-  n_cov <- save_or_append(data_list$coverage, CONFIG$output_coverage)
-  
-  log_msg(sprintf("Saved batch: %d inspections, %d violations, %d remediation, %d permits, %d coverage, %d errors",
-                  n_insp, n_viol, n_remed, n_perm, n_cov, n_err))
-  
-  save_checkpoint(checkpoint)
+    dt <- as.data.table(tbl)
+    setnames(dt, janitor::make_clean_names(names(dt)))
+    dt <- dt[rowSums(is.na(dt) | dt == "") < ncol(dt)]
+    return(dt)
+  }, error = function(e) NULL)
 }
 
 # ============================================================================
-# SECTION 3: eFACTS SCRAPING FUNCTIONS
+# 4. SCRAPING FUNCTIONS
 # ============================================================================
 
-#' Scrape a single eFACTS facility page
-#' 
-#' @param facility_id eFACTS FacilityID (numeric, e.g., 575215)
-#' @return List with inspections, permits, remediation, violation_ids, or error
 scrape_facility_page <- function(facility_id) {
+  url <- sprintf("https://www.ahs.dep.pa.gov/eFACTSWeb/searchResults_singleFacility.aspx?FacilityID=%s", facility_id)
   
-  url <- sprintf(
-    "https://www.ahs.dep.pa.gov/eFACTSWeb/searchResults_singleFacility.aspx?FacilityID=%s",
-    facility_id
-  )
+  raw_res <- list(id = facility_id, url = url, error = NULL,
+                  meta_dt = NULL, tanks_dt = NULL, insp_dt = NULL, 
+                  perm_dt = NULL, rem_dt = NULL,
+                  viol_links = character(), auth_links = character(), remed_links = character())
   
-  result <- list(
-    facility_id = as.character(facility_id),
-    url = url,
-    scraped_at = Sys.time(),
-    inspections = NULL,
-    permits = NULL,
-    remediation = NULL,
-    violation_inspection_ids = character(0),
-    error = NULL
-  )
+  page <- tryCatch({
+    res <- GET(url, timeout(CONFIG$timeout), add_headers("User-Agent" = "R-USTIF-Research/2.0"))
+    if (status_code(res) != 200) stop(paste("HTTP", status_code(res)))
+    read_html(res)
+  }, error = function(e) { raw_res$error <<- e$message; return(NULL) })
   
-  # Attempt request with retries
-  page <- NULL
-  for (attempt in 1:CONFIG$max_retries) {
-    tryCatch({
-      response <- GET(
-        url,
-        timeout(CONFIG$timeout_seconds),
-        add_headers("User-Agent" = "R-USTIF-Research/2.0 (Academic)")
-      )
-      
-      if (status_code(response) == 200) {
-        page <- read_html(response)
-        break
-      } else {
-        Sys.sleep(2^attempt)
-      }
-    }, error = function(e) {
-      if (attempt == CONFIG$max_retries) {
-        result$error <- e$message
-      }
-      Sys.sleep(2^attempt)
-    })
-  }
-  
-  if (is.null(page)) {
-    if (is.null(result$error)) result$error <- "Failed to retrieve page"
-    return(result)
-  }
-  
-  # Check if page contains valid facility data (not an error page)
-  # eFACTS error pages typically have specific text patterns
-  page_text <- tryCatch(
-    page %>% html_text(),
-    error = function(e) ""
-  )
-  
-  if (grepl("No records found|Invalid Facility|Error occurred", page_text, ignore.case = TRUE)) {
-    result$error <- "No facility data found (possibly invalid FacilityID)"
-    return(result)
-  }
-  
-  # Extract all tables safely
-  tables <- tryCatch(
-    page %>% html_elements("table"),
-    error = function(e) {
-      result$error <- paste("Failed to extract tables:", e$message)
-      return(list())
-    }
-  )
-  
-  # If no tables found, return early (not an error - facility may just have no data)
-  if (length(tables) == 0) {
-    return(result)
-  }
-  
-  # Helper function to safely parse a table
-  safe_parse_table <- function(tbl_node, facility_id) {
-    tryCatch({
-      tbl <- html_table(tbl_node, fill = TRUE)
-      
-      # Check for empty or malformed table
-      if (is.null(tbl) || !is.data.frame(tbl)) return(NULL)
-      if (nrow(tbl) == 0) return(NULL)
-      if (ncol(tbl) < 2) return(NULL)
-      
-      # Check if table has actual data (not just headers)
-      # Some empty tables render with header row only
-      if (nrow(tbl) == 1 && all(is.na(tbl[1,]) | tbl[1,] == "")) return(NULL)
-      
-      # Clean names and add facility ID
-      tbl <- tbl %>%
-        clean_names() %>%
-        mutate(
-          efacts_facility_id = as.character(facility_id),
-          .row_id = row_number()
-        )
-      
-      return(tbl)
-      
-    }, error = function(e) {
-      return(NULL)
-    })
-  }
-  
-  # Parse each table by identifying its type from column names
-  for (tbl_node in tables) {
-    
-    tbl <- safe_parse_table(tbl_node, facility_id)
-    
-    # Skip if table parsing failed or returned empty
-    if (is.null(tbl)) next
-    if (nrow(tbl) == 0) next
-    
-    col_names <- tolower(names(tbl))
-    col_str <- paste(col_names, collapse = " ")
-    
-    # Inspection table: has "inspection" in columns
-    if (grepl("inspection.*type|inspection.*date", col_str) && is.null(result$inspections)) {
-      # Additional validation: should have date-like column
-      if (any(grepl("date", col_names))) {
-        result$inspections <- tbl
+  if (is.null(page)) return(raw_res)
+  if (grepl("Invalid Facility|No records found", html_text(page))) { raw_res$error <- "Invalid/Empty"; return(raw_res) }
+
+  # 1. Meta
+  meta_node <- page %>% html_element("#ContentPlaceHolder2_DetailsView1")
+  if (!is.na(meta_node)) {
+    rows <- meta_node %>% html_elements("tr")
+    if (length(rows) > 0) {
+      keys <- rows %>% html_element("td:nth-child(1)") %>% html_text(trim=TRUE) %>% str_remove(":$") %>% make_clean_names()
+      vals <- rows %>% html_element("td:nth-child(2)") %>% html_text(trim=TRUE)
+      valid_idx <- !is.na(keys) & !is.na(vals)
+      if(any(valid_idx)) {
+        dt <- as.data.table(t(vals[valid_idx]))
+        setnames(dt, keys[valid_idx])
+        dt[, efacts_facility_id := as.character(facility_id)]
+        raw_res$meta_dt <- enforce_schema(dt, "meta")
       }
     }
+  }
+
+  # 2. Tanks
+  t_dt <- parse_table_raw(page %>% html_element("#ContentPlaceHolder2_GridView1"))
+  if (!is.null(t_dt)) {
+    t_dt[, efacts_facility_id := as.character(facility_id)]
+    if("sub_facility_name" %in% names(t_dt)) {
+      t_dt[, tank_internal_id := paste0(efacts_facility_id, "_", make_clean_names(sub_facility_name))]
+    }
+    raw_res$tanks_dt <- enforce_schema(t_dt, "tanks")
+  }
+
+  # 3. Permits (Summary)
+  # Just used for links
+  p_dt <- parse_table_raw(page %>% html_element("#ContentPlaceHolder2_GridView2"))
+  if (!is.null(p_dt)) {
+    raw_res$auth_links <- page %>% html_element("#ContentPlaceHolder2_GridView2") %>% 
+      html_elements("a[href*='AuthID']") %>% html_attr("href") %>% 
+      str_extract("AuthID=\\d+") %>% str_remove("AuthID=") %>% unique()
+  }
+
+  # 4. Inspections (CLEANING FIX)
+  i_dt <- parse_table_raw(page %>% html_element("#ContentPlaceHolder2_GridView3"))
+  if (!is.null(i_dt)) {
+    i_dt[, efacts_facility_id := as.character(facility_id)]
     
-    # Permits table: has "authorization" or "permit"
-    if (grepl("authorization|permit.*number|date.*received", col_str) && is.null(result$permits)) {
-      result$permits <- tbl
+    # RENAME to inspection_type_raw if valid
+    if("inspection_type" %in% names(i_dt)) {
+      setnames(i_dt, "inspection_type", "inspection_type_raw")
+      
+      # Extract ID and Clean Name
+      i_dt[, `:=`(
+        inspection_id = str_extract(inspection_type_raw, "(?<=\\()\\d+(?=\\))"),
+        inspection_type_clean = str_trim(str_remove(inspection_type_raw, "\\s*\\(\\d+\\)"))
+      )]
     }
     
-    # Remediation/Tank Remediation table: has "incident" or "release" or "cleanup"
-    if (grepl("incident.*name|release.*date|cleanup.*status|confirmed.*release", col_str) && is.null(result$remediation)) {
-      result$remediation <- tbl
+    raw_res$insp_dt <- enforce_schema(i_dt, "inspections")
+    
+    raw_res$viol_links <- page %>% html_element("#ContentPlaceHolder2_GridView3") %>% 
+      html_elements("a[href*='singleViol']") %>% html_attr("href") %>% 
+      str_extract("InspectionID=\\d+") %>% str_remove("InspectionID=") %>% unique()
+  }
+
+  # 5. Remediation (Summary)
+  r_dt <- parse_table_raw(page %>% html_element("#ContentPlaceHolder2_GridView4"))
+  if (!is.null(r_dt)) {
+    r_dt[, efacts_facility_id := as.character(facility_id)]
+    if("incident_name" %in% names(r_dt)) {
+      raw_res$remed_links <- page %>% html_element("#ContentPlaceHolder2_GridView4") %>% 
+        html_elements("a[href*='LRPACT_ID']") %>% html_attr("href") %>% 
+        str_extract("LRPACT_ID=\\d+") %>% str_remove("LRPACT_ID=") %>% unique()
+      
+      # Try to extract ID from name: "INCIDENT NAME (1234)"
+      r_dt[, lrpact_id := str_extract(incident_name, "(?<=\\()\\d+(?=\\))")]
     }
+    raw_res$rem_dt <- enforce_schema(r_dt, "rem_summary")
   }
   
-  # Extract inspection IDs that have violation links
-  # These are links to the violation detail page
-  violation_links <- tryCatch({
-    links <- page %>%
-      html_elements("a[href*='searchResults_singleViol']") %>%
-      html_attr("href")
-    
-    # Return empty if NULL or not character
-    if (is.null(links) || !is.character(links)) return(character(0))
-    return(links)
-    
-  }, error = function(e) character(0))
-  
-  if (length(violation_links) > 0) {
-    # Extract InspectionID from URLs like "...?InspectionID=2908157"
-    extracted_ids <- str_extract(violation_links, "\\d+$")
-    result$violation_inspection_ids <- extracted_ids[!is.na(extracted_ids)] %>%
-      unique() %>%
-      as.character()
-  }
-  
-  return(result)
+  return(raw_res)
 }
 
-#' Scrape violation detail page
-#' 
-#' @param inspection_id InspectionID from violation link
-#' @param facility_id Parent facility ID for reference
-#' @return tibble with violation details
-scrape_violation_page <- function(inspection_id, facility_id) {
+# --- VIOLATION DETAIL (State Machine) ---
+scrape_violation_detail <- function(inspection_id, facility_id) {
+  url <- sprintf("https://www.ahs.dep.pa.gov/eFACTSWeb/searchResults_singleViol.aspx?InspectionID=%s", inspection_id)
+  final_dt <- get_template("violations")
   
-  url <- sprintf(
-    "https://www.ahs.dep.pa.gov/eFACTSWeb/searchResults_singleViol.aspx?InspectionID=%s",
-    inspection_id
-  )
-  
-  for (attempt in 1:CONFIG$max_retries) {
-    tryCatch({
-      response <- GET(
-        url,
-        timeout(CONFIG$timeout_seconds),
-        add_headers("User-Agent" = "R-USTIF-Research/2.0 (Academic)")
-      )
+  tryCatch({
+    res <- GET(url, timeout(CONFIG$timeout))
+    if (status_code(res) != 200) return(final_dt)
+    page <- read_html(res)
+    
+    viol_tables <- page %>% html_elements("table.GridViewTable[border='2']")
+    if (length(viol_tables) == 0) return(final_dt)
+    
+    row_list <- list()
+    
+    for (tbl in viol_tables) {
+      rows <- tbl %>% html_elements("tr")
       
-      if (status_code(response) == 200) {
-        page <- read_html(response)
-        
-        # Extract all tables from violation page
-        table_nodes <- tryCatch(
-          page %>% html_elements("table"),
-          error = function(e) list()
-        )
-        
-        if (length(table_nodes) == 0) {
-          # No tables found - return info row (not an error)
-          return(tibble(
-            inspection_id = as.character(inspection_id),
-            efacts_facility_id = as.character(facility_id),
-            violation_url = url,
-            note = "No violation tables found on page",
-            scraped_at = Sys.time()
-          ))
-        }
-        
-        # Parse each table safely
-        parsed_tables <- list()
-        for (tbl_node in table_nodes) {
-          tbl <- tryCatch({
-            parsed <- html_table(tbl_node, fill = TRUE)
-            
-            # Skip empty or malformed tables
-            if (is.null(parsed) || !is.data.frame(parsed)) return(NULL)
-            if (nrow(parsed) == 0) return(NULL)
-            if (ncol(parsed) < 1) return(NULL)
-            
-            # Clean and return
-            parsed %>% clean_names()
-            
-          }, error = function(e) NULL)
+      curr_v <- list(id=NA, date=NA, desc=NA, res=NA, cit=NA, type=NA)
+      enforcements <- list()
+      
+      if (length(rows) > 1) {
+        for (i in 2:length(rows)) {
+          tr <- rows[[i]]
+          tds <- tr %>% html_elements("td")
+          tr_text <- html_text(tr, trim = TRUE)
           
-          if (!is.null(tbl) && nrow(tbl) > 0) {
-            parsed_tables[[length(parsed_tables) + 1]] <- tbl
+          # NEW VIOLATION
+          if (length(html_attr(tds, "rowspan")) > 0 && !is.na(html_attr(tds, "rowspan")[1])) {
+            if (!is.na(curr_v$id)) {
+              if (length(enforcements) == 0) {
+                row_list[[length(row_list)+1]] <- list(
+                  efacts_facility_id=facility_id, inspection_id=inspection_id,
+                  violation_id=curr_v$id, violation_date=curr_v$date, description=curr_v$desc,
+                  resolution=curr_v$res, citation=curr_v$cit, violation_type=curr_v$type
+                )
+              } else {
+                for (e in enforcements) {
+                  row_list[[length(row_list)+1]] <- c(
+                    list(efacts_facility_id=facility_id, inspection_id=inspection_id,
+                         violation_id=curr_v$id, violation_date=curr_v$date, description=curr_v$desc,
+                         resolution=curr_v$res, citation=curr_v$cit, violation_type=curr_v$type),
+                    e
+                  )
+                }
+              }
+            }
+            curr_v <- list(
+              id = html_text(tds[[1]], trim=TRUE),
+              date = html_text(tds[[2]], trim=TRUE),
+              desc = html_text(tds[[3]], trim=TRUE),
+              res=NA, cit=NA, type=NA
+            )
+            enforcements <- list()
+          } else {
+            # DETAILS
+            if (str_starts(tr_text, "Resolution:")) curr_v$res <- str_remove(tr_text, "^Resolution:\\s*")
+            if (str_starts(tr_text, "PA Code Legal Citation:")) curr_v$cit <- str_remove(tr_text, "^PA Code Legal Citation:\\s*") %>% str_remove(" : PA Code Website.*")
+            if (str_starts(tr_text, "Violation Type:")) curr_v$type <- str_remove(tr_text, "^Violation Type:\\s*")
+            
+            # ENFORCEMENT TABLE (Cell Census)
+            nested <- tr %>% html_elements("table")
+            if (length(nested) > 0) {
+              for (nt in nested) {
+                if (grepl("Enforcement ID:", html_text(nt))) {
+                  cells <- nt %>% html_elements("td") %>% html_text(trim = TRUE)
+                  e_rec <- list(enforcement_id=NA, enf_type=NA, penalty_assessed=NA, penalty_collected=NA,
+                                date_executed=NA, penalty_final_date=NA, total_amount_due=NA, taken_against=NA,
+                                on_appeal=NA, penalty_status=NA, enforcement_status=NA, num_violations_addressed=NA)
+                  for (c in cells) {
+                    if (str_detect(c, "^Enforcement ID:")) e_rec$enforcement_id <- str_remove(c, "Enforcement ID:\\s*")
+                    if (str_detect(c, "^Enforcement Type:")) e_rec$enf_type <- str_remove(c, "Enforcement Type:\\s*")
+                    if (str_detect(c, "^Penalty Amount Assessed:")) e_rec$penalty_assessed <- str_remove(c, "Penalty Amount Assessed:\\s*")
+                    if (str_detect(c, "^Total Amount Collected:")) e_rec$penalty_collected <- str_remove(c, "Total Amount Collected:\\s*")
+                    if (str_detect(c, "^Date Executed:")) e_rec$date_executed <- str_remove(c, "Date Executed:\\s*")
+                    if (str_detect(c, "^Penalty Final Date:")) e_rec$penalty_final_date <- str_remove(c, "Penalty Final Date:\\s*")
+                    if (str_detect(c, "^Total Amount Due:")) e_rec$total_amount_due <- str_remove(c, "Total Amount Due:\\s*")
+                    if (str_detect(c, "^Taken Against:")) e_rec$taken_against <- str_remove(c, "Taken Against:\\s*")
+                    if (str_detect(c, "^On Appeal\\?")) e_rec$on_appeal <- str_remove(c, "On Appeal\\?\\s*")
+                    if (str_detect(c, "^Penalty Status:")) e_rec$penalty_status <- str_remove(c, "Penalty Status:\\s*")
+                    if (str_detect(c, "^Enforcement Status:")) e_rec$enforcement_status <- str_remove(c, "Enforcement Status:\\s*")
+                    if (str_detect(c, "^# of Violations Addressed")) e_rec$num_violations_addressed <- str_extract(c, "\\d+$")
+                  }
+                  enforcements[[length(enforcements)+1]] <- e_rec
+                }
+              }
+            }
           }
         }
-        
-        if (length(parsed_tables) > 0) {
-          # Combine all valid tables
-          combined <- bind_rows(parsed_tables) %>%
-            mutate(
-              inspection_id = as.character(inspection_id),
-              efacts_facility_id = as.character(facility_id),
-              violation_url = url,
-              scraped_at = Sys.time()
-            )
-          return(combined)
+      }
+      
+      # Flush Final
+      if (!is.na(curr_v$id)) {
+        if (length(enforcements) == 0) {
+          row_list[[length(row_list)+1]] <- list(
+            efacts_facility_id=facility_id, inspection_id=inspection_id,
+            violation_id=curr_v$id, violation_date=curr_v$date, description=curr_v$desc,
+            resolution=curr_v$res, citation=curr_v$cit, violation_type=curr_v$type
+          )
         } else {
-          # Tables existed but all were empty/unparseable
-          return(tibble(
-            inspection_id = as.character(inspection_id),
-            efacts_facility_id = as.character(facility_id),
-            violation_url = url,
-            note = "Tables found but none contained parseable data",
-            scraped_at = Sys.time()
-          ))
+          for (e in enforcements) {
+            row_list[[length(row_list)+1]] <- c(
+              list(efacts_facility_id=facility_id, inspection_id=inspection_id,
+                   violation_id=curr_v$id, violation_date=curr_v$date, description=curr_v$desc,
+                   resolution=curr_v$res, citation=curr_v$cit, violation_type=curr_v$type),
+              e
+            )
+          }
+        }
+      }
+    }
+    
+    if (length(row_list) > 0) {
+      dt_raw <- rbindlist(row_list, fill = TRUE)
+      return(enforce_schema(dt_raw, "violations"))
+    } else {
+      return(final_dt)
+    }
+    
+  }, error = function(e) final_dt)
+}
+
+# --- PERMIT DETAIL (CLEANING FIX) ---
+scrape_permit_detail <- function(auth_id, facility_id) {
+  url <- sprintf("https://www.ahs.dep.pa.gov/eFACTSWeb/searchResults_singleAuth.aspx?AuthID=%s", auth_id)
+  
+  out <- list(details = get_template("perm_det"), tasks = get_template("perm_tasks"))
+  
+  tryCatch({
+    res <- GET(url, timeout(CONFIG$timeout))
+    if (status_code(res) != 200) return(out)
+    page <- read_html(res)
+    
+    # 1. Main
+    rows <- page %>% html_elements("#ContentPlaceHolder2_DetailsView1 tr")
+    keys <- rows %>% html_element("td:nth-child(1)") %>% html_text(trim=TRUE) %>% str_remove(":$") %>% make_clean_names()
+    vals <- rows %>% html_element("td:nth-child(2)") %>% html_text(trim=TRUE)
+    valid_idx <- !is.na(keys) & !is.na(vals)
+    
+    if(any(valid_idx)) {
+      dt <- as.data.table(t(vals[valid_idx]))
+      setnames(dt, keys[valid_idx])
+      dt[, `:=`(auth_id = as.character(auth_id), efacts_facility_id = as.character(facility_id))]
+      out$details <- enforce_schema(dt, "perm_det")
+    }
+    
+    # 2. Tasks (GHOST ROW FIX)
+    static_tables <- page %>% html_elements("table.StaticTable")
+    for (tbl in static_tables) {
+      t <- html_table(tbl, fill=TRUE)
+      if ("Task" %in% names(t)) {
+        t_dt <- as.data.table(t)
+        setnames(t_dt, janitor::make_clean_names(names(t_dt)))
+        
+        # FILTER: Remove ghost rows (where Task is empty or just whitespace)
+        t_dt <- t_dt[task != "" & !is.na(task) & str_length(task) > 1]
+        
+        if (nrow(t_dt) > 0) {
+          t_dt[, `:=`(
+            auth_id = as.character(auth_id), efacts_facility_id = as.character(facility_id), 
+            task_internal_id = paste0(auth_id, "_", make_clean_names(task), "_", .I)
+          )]
+          out$tasks <- enforce_schema(t_dt, "perm_tasks")
+        }
+        break
+      }
+    }
+    return(out)
+  }, error = function(e) out)
+}
+
+scrape_remediation_detail <- function(lrpact_id, facility_id) {
+  url <- sprintf("https://www.ahs.dep.pa.gov/eFACTSWeb/searchResults_singleTankRemediation.aspx?LRPACT_ID=%s", lrpact_id)
+  out <- list(substances = get_template("rem_sub"), milestones = get_template("rem_mil"))
+  
+  tryCatch({
+    res <- GET(url, timeout(CONFIG$timeout))
+    if (status_code(res) != 200) return(out)
+    page <- read_html(res)
+    
+    s_dt <- parse_table_raw(page %>% html_element("#ContentPlaceHolder2_GridView1"))
+    if (!is.null(s_dt)) {
+      s_dt[, `:=`(
+        efacts_facility_id = as.character(facility_id),
+        lrpact_id = as.character(lrpact_id),
+        substance_internal_id = paste0(lrpact_id, "_", make_clean_names(substance_released), "_", .I)
+      )]
+      out$substances <- enforce_schema(s_dt, "rem_sub")
+    }
+    
+    m_dt <- parse_table_raw(page %>% html_element("#ContentPlaceHolder2_GridView2"))
+    if (!is.null(m_dt)) {
+      m_dt[, `:=`(
+        efacts_facility_id = as.character(facility_id),
+        lrpact_id = as.character(lrpact_id),
+        milestone_internal_id = paste0(lrpact_id, "_", make_clean_names(milestone_name), "_", .I)
+      )]
+      out$milestones <- enforce_schema(m_dt, "rem_mil")
+    }
+    return(out)
+  }, error = function(e) out)
+}
+
+# ============================================================================
+# 5. EXECUTION & SAVE
+# ============================================================================
+
+save_batch <- function(batch) {
+  save_rds_csv <- function(data_list, name) {
+    if (length(data_list) == 0) return()
+    combined_dt <- rbindlist(data_list) # Schemas match perfectly now
+    combined_dt[, batch_import_date := as.character(Sys.time())]
+    
+    path_rds <- file.path(CONFIG$efacts_dir, paste0(name, ".rds"))
+    if (file.exists(path_rds)) {
+      old_dt <- readRDS(path_rds)
+      combined_dt <- rbindlist(list(old_dt, combined_dt), fill = TRUE) 
+    } 
+    saveRDS(combined_dt, path_rds)
+    
+    path_csv <- file.path(CONFIG$efacts_dir, paste0(name, ".csv"))
+    fwrite(combined_dt, path_csv)
+  }
+  
+  save_rds_csv(batch$meta, "efacts_facility_meta")
+  save_rds_csv(batch$tanks, "efacts_tanks")
+  save_rds_csv(batch$insp, "efacts_inspections")
+  save_rds_csv(batch$viol, "efacts_violations")
+  save_rds_csv(batch$rem, "efacts_remediation_summary")
+  save_rds_csv(batch$rem_sub, "efacts_remediation_substances")
+  save_rds_csv(batch$rem_mil, "efacts_remediation_milestones")
+  save_rds_csv(batch$perm_det, "efacts_permits_detail")
+  save_rds_csv(batch$perm_tasks, "efacts_permits_tasks")
+  save_rds_csv(batch$cov, "efacts_facility_coverage")
+  save_rds_csv(batch$err, "efacts_scrape_errors")
+}
+
+run_scraper <- function(facility_ids) {
+  if (file.exists(CONFIG$checkpoint_file)) {
+    cp <- readRDS(CONFIG$checkpoint_file)
+    log_msg(sprintf("RESUMING: Skipping %d facilities.", length(cp$completed_ids)))
+  } else {
+    cp <- list(completed_ids = character(0))
+    log_msg("STARTING FRESH.")
+  }
+  
+  remaining <- setdiff(as.character(facility_ids), cp$completed_ids)
+  if (length(remaining) == 0) return(invisible(NULL))
+  
+  batch <- list(meta=list(), tanks=list(), insp=list(), viol=list(), 
+                rem=list(), rem_sub=list(), rem_mil=list(),
+                perm_det=list(), perm_tasks=list(), cov=list(), err=list())
+  count <- 0
+  
+  on.exit({
+    if (count > 0) {
+      log_msg("⚠️  INTERRUPT: Emergency Save...")
+      save_batch(batch)
+      cp$completed_ids <- c(cp$completed_ids, remaining[1:count])
+      saveRDS(cp, CONFIG$checkpoint_file)
+    }
+  })
+  
+  for (fid in remaining) {
+    count <- count + 1
+    fac_res <- scrape_facility_page(fid)
+    
+    cov_rec <- get_template("cov")
+    cov_rec[, `:=`(
+      efacts_facility_id = fid,
+      found_meta = !is.null(fac_res$meta_dt),
+      n_tanks = if(!is.null(fac_res$tanks_dt)) nrow(fac_res$tanks_dt) else 0,
+      n_inspections = if(!is.null(fac_res$insp_dt)) nrow(fac_res$insp_dt) else 0,
+      n_violations = 0, n_permits = 0,
+      status = if(is.null(fac_res$error)) "success" else "error",
+      scraped_at = as.character(Sys.time())
+    )]
+    
+    if (is.null(fac_res$error)) {
+      if(!is.null(fac_res$meta_dt)) batch$meta[[length(batch$meta)+1]] <- fac_res$meta_dt
+      if(!is.null(fac_res$tanks_dt)) batch$tanks[[length(batch$tanks)+1]] <- fac_res$tanks_dt
+      if(!is.null(fac_res$insp_dt)) batch$insp[[length(batch$insp)+1]] <- fac_res$insp_dt
+      if(!is.null(fac_res$rem_dt)) batch$rem[[length(batch$rem)+1]] <- fac_res$rem_dt
+      
+      if (CONFIG$scrape_violations) {
+        for (vid in fac_res$viol_links) {
+          v_dt <- scrape_violation_detail(vid, fid)
+          if (nrow(v_dt) > 0) {
+            batch$viol[[length(batch$viol)+1]] <- v_dt
+            cov_rec[, n_violations := n_violations + nrow(v_dt)]
+          }
+          Sys.sleep(CONFIG$delay_detail)
         }
       }
       
-      Sys.sleep(2^attempt)
+      if (CONFIG$scrape_permit_details) {
+        for (aid in fac_res$auth_links) {
+          p_res <- scrape_permit_detail(aid, fid)
+          if (nrow(p_res$details) > 0) batch$perm_det[[length(batch$perm_det)+1]] <- p_res$details
+          if (nrow(p_res$tasks) > 0) {
+            batch$perm_tasks[[length(batch$perm_tasks)+1]] <- p_res$tasks
+            cov_rec[, n_permits := n_permits + nrow(p_res$tasks)]
+          }
+          Sys.sleep(CONFIG$delay_detail)
+        }
+      }
       
-    }, error = function(e) {
-      Sys.sleep(2^attempt)
-    })
-  }
-  
-  # Return error row if all attempts failed
-  return(tibble(
-    inspection_id = as.character(inspection_id),
-    efacts_facility_id = as.character(facility_id),
-    violation_url = url,
-    error = "Failed to retrieve violation details after retries",
-    scraped_at = Sys.time()
-  ))
-}
-
-# ============================================================================
-# SECTION 4: MAIN SCRAPING LOOP
-# ============================================================================
-
-log_msg("Starting eFACTS scrape...")
-cat("\n")
-
-# Load checkpoint
-checkpoint <- load_checkpoint()
-
-# Determine which facilities still need scraping
-remaining_ids <- setdiff(as.character(facility_ids), checkpoint$completed_ids)
-log_msg(sprintf("%d facilities remaining to scrape", length(remaining_ids)))
-
-if (length(remaining_ids) == 0) {
-  log_msg("All facilities already scraped. Nothing to do.")
-  quit(save = "no")
-}
-
-# Initialize batch accumulators
-batch_data <- list(
-  inspections = list(),
-  violations = list(),
-  remediation = list(),
-  permits = list(),
-  errors = list(),
-  coverage = list()  # Facility-level missingness tracking
-)
-
-batch_count <- 0
-total_processed <- checkpoint$completed_count
-
-# Progress tracking
-start_time <- Sys.time()
-
-for (i in seq_along(remaining_ids)) {
-  
-  fid <- remaining_ids[i]
-  
-  # Progress indicator
-  total_processed <- total_processed + 1
-  pct <- round(100 * total_processed / checkpoint$total_count, 1)
-  
-  elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
-  rate <- i / elapsed
-  eta_seconds <- (length(remaining_ids) - i) / rate
-  eta_hours <- round(eta_seconds / 3600, 1)
-  
-  cat(sprintf("\r[%s] Facility %d/%d (%.1f%%) | Rate: %.1f/sec | ETA: %.1fh    ",
-              format(Sys.time(), "%H:%M:%S"),
-              total_processed, 
-              checkpoint$total_count,
-              pct,
-              rate,
-              eta_hours))
-  
-  # Scrape facility page
-  facility_result <- scrape_facility_page(fid)
-  
-  # =========================================================================
-  # CREATE COVERAGE/MISSINGNESS RECORD FOR THIS FACILITY
-  # =========================================================================
-  # This tracks what data exists (or is missing) for each facility
-  # Old/closed facilities with no inspection history will have 0s - this is
-  # expected and useful for analysis, not an error condition
-  
-  n_inspections <- if (!is.null(facility_result$inspections)) nrow(facility_result$inspections) else 0
-  n_permits <- if (!is.null(facility_result$permits)) nrow(facility_result$permits) else 0
-  n_remediation <- if (!is.null(facility_result$remediation)) nrow(facility_result$remediation) else 0
-  n_violation_links <- length(facility_result$violation_inspection_ids)
-  
-  coverage_record <- tibble(
-    efacts_facility_id = as.character(fid),
-    
-    # Binary missingness indicators (1 = missing/no data, 0 = has data)
-    missing_inspections = as.integer(n_inspections == 0),
-    missing_permits = as.integer(n_permits == 0),
-    missing_remediation = as.integer(n_remediation == 0),
-    missing_violations = as.integer(n_violation_links == 0),
-    
-    # Inverse: has data indicators (1 = has data, 0 = no data)
-    has_inspections = as.integer(n_inspections > 0),
-    has_permits = as.integer(n_permits > 0),
-    has_remediation = as.integer(n_remediation > 0),
-    has_violations = as.integer(n_violation_links > 0),
-    
-    # Counts for more granular analysis
-    n_inspection_records = n_inspections,
-    n_permit_records = n_permits,
-    n_remediation_records = n_remediation,
-    n_violation_links = n_violation_links,
-    
-    # Scrape metadata
-    scrape_status = if (is.null(facility_result$error)) "success" else "error",
-    scrape_error = if (is.null(facility_result$error)) NA_character_ else facility_result$error,
-    scraped_at = Sys.time()
-  )
-  
-  batch_data$coverage[[length(batch_data$coverage) + 1]] <- coverage_record
-  
-  # =========================================================================
-  # ACCUMULATE DATA RESULTS (unchanged logic)
-  # =========================================================================
-  
-  # Only log errors for actual HTTP/parsing failures, not missing data
-  if (!is.null(facility_result$error)) {
-    batch_data$errors[[length(batch_data$errors) + 1]] <- tibble(
-      efacts_facility_id = fid,
-      error = facility_result$error,
-      url = facility_result$url,
-      scraped_at = Sys.time()
-    )
-  }
-  
-  if (!is.null(facility_result$inspections) && nrow(facility_result$inspections) > 0) {
-    batch_data$inspections[[length(batch_data$inspections) + 1]] <- facility_result$inspections
-  }
-  
-  if (!is.null(facility_result$permits) && nrow(facility_result$permits) > 0) {
-    batch_data$permits[[length(batch_data$permits) + 1]] <- facility_result$permits
-  }
-  
-  if (!is.null(facility_result$remediation) && nrow(facility_result$remediation) > 0) {
-    batch_data$remediation[[length(batch_data$remediation) + 1]] <- facility_result$remediation
-  }
-  
-  # Scrape violation detail pages
-  if (length(facility_result$violation_inspection_ids) > 0) {
-    for (insp_id in facility_result$violation_inspection_ids) {
-      Sys.sleep(CONFIG$delay_violation)
-      viol_result <- scrape_violation_page(insp_id, fid)
-      batch_data$violations[[length(batch_data$violations) + 1]] <- viol_result
+      if (CONFIG$scrape_remediation_details) {
+        for (rid in fac_res$remed_links) {
+          r_res <- scrape_remediation_detail(rid, fid)
+          if (nrow(r_res$substances) > 0) batch$rem_sub[[length(batch$rem_sub)+1]] <- r_res$substances
+          if (nrow(r_res$milestones) > 0) batch$rem_mil[[length(batch$rem_mil)+1]] <- r_res$milestones
+          Sys.sleep(CONFIG$delay_detail)
+        }
+      }
+    } else {
+      err_rec <- get_template("err")
+      err_rec[, `:=`(efacts_facility_id = fid, error_msg = fac_res$error, time = as.character(Sys.time()))]
+      batch$err[[length(batch$err)+1]] <- err_rec
     }
-  }
-  
-  # Update checkpoint
-  checkpoint$completed_ids <- c(checkpoint$completed_ids, fid)
-  checkpoint$completed_count <- checkpoint$completed_count + 1
-  batch_count <- batch_count + 1
-  
-  # Save batch checkpoint
-  if (batch_count >= CONFIG$batch_size) {
-    cat("\n")
-    log_msg(sprintf("Saving checkpoint at %d facilities...", total_processed))
-    save_accumulated_data(batch_data, checkpoint)
     
-    # Reset batch accumulators
-    batch_data <- list(
-      inspections = list(),
-      violations = list(),
-      remediation = list(),
-      permits = list(),
-      errors = list(),
-      coverage = list()
-    )
-    batch_count <- 0
-    cat("\n")
+    batch$cov[[length(batch$cov)+1]] <- cov_rec
+    
+    cat(sprintf("\r[%s] %d/%d (%s) | T:%d I:%d V:%d", 
+                format(Sys.time(), "%H:%M"), count, length(remaining), fid,
+                cov_rec$n_tanks, cov_rec$n_inspections, cov_rec$n_violations))
+    
+    if (count %% CONFIG$batch_size == 0) {
+      save_batch(batch)
+      batch <- list(meta=list(), tanks=list(), insp=list(), viol=list(), 
+                    rem=list(), rem_sub=list(), rem_mil=list(),
+                    perm_det=list(), perm_tasks=list(), cov=list(), err=list())
+      cp$completed_ids <- c(cp$completed_ids, remaining[(count - CONFIG$batch_size + 1):count])
+      saveRDS(cp, CONFIG$checkpoint_file)
+    }
+    Sys.sleep(CONFIG$delay_facility)
   }
   
-  # Rate limiting
-  Sys.sleep(CONFIG$delay_seconds)
-}
-
-# Final save
-cat("\n")
-log_msg("Saving final batch...")
-save_accumulated_data(batch_data, checkpoint)
-
-# ============================================================================
-# SECTION 5: POST-PROCESSING AND SUMMARY
-# ============================================================================
-
-cat("\n")
-cat("╔══════════════════════════════════════════════════════════════════════╗\n")
-cat("║  SCRAPING COMPLETE                                                   ║\n")
-cat("╚══════════════════════════════════════════════════════════════════════╝\n\n")
-
-# Load and summarize results
-load_and_count <- function(filename) {
-  filepath <- file.path(CONFIG$efacts_dir, filename)
-  if (file.exists(filepath)) {
-    df <- readRDS(filepath)
-    return(list(records = nrow(df), file = filepath))
+  final_count <- count; count <- 0 
+  if (final_count %% CONFIG$batch_size != 0) {
+    save_batch(batch)
+    cp$completed_ids <- c(cp$completed_ids, remaining[(final_count - (final_count %% CONFIG$batch_size) + 1):final_count])
+    saveRDS(cp, CONFIG$checkpoint_file)
   }
-  return(list(records = 0, file = NA))
-}
-
-results <- list(
-  Inspections = load_and_count(CONFIG$output_inspections),
-  Violations = load_and_count(CONFIG$output_violations),
-  Remediation = load_and_count(CONFIG$output_remediation),
-  Permits = load_and_count(CONFIG$output_permits),
-  Coverage = load_and_count(CONFIG$output_coverage),
-  Errors = load_and_count(CONFIG$output_errors)
-)
-
-cat("Scraped Data Summary:\n")
-cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-for (name in names(results)) {
-  cat(sprintf("  %-15s %8d records\n", paste0(name, ":"), results[[name]]$records))
-}
-cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-
-# Coverage/Missingness Summary
-coverage_path <- file.path(CONFIG$efacts_dir, CONFIG$output_coverage)
-if (file.exists(coverage_path)) {
-  coverage_df <- readRDS(coverage_path)
-  
-  cat("\nMissingness Summary (from coverage table):\n")
-  cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-  cat(sprintf("  Total facilities scraped:     %d\n", nrow(coverage_df)))
-  cat(sprintf("  Missing inspections:          %d (%.1f%%)\n", 
-              sum(coverage_df$missing_inspections), 
-              100 * mean(coverage_df$missing_inspections)))
-  cat(sprintf("  Missing permits:              %d (%.1f%%)\n", 
-              sum(coverage_df$missing_permits), 
-              100 * mean(coverage_df$missing_permits)))
-  cat(sprintf("  Missing remediation:          %d (%.1f%%)\n", 
-              sum(coverage_df$missing_remediation), 
-              100 * mean(coverage_df$missing_remediation)))
-  cat(sprintf("  Missing violations:           %d (%.1f%%)\n", 
-              sum(coverage_df$missing_violations), 
-              100 * mean(coverage_df$missing_violations)))
-  cat(sprintf("  Scrape errors:                %d (%.1f%%)\n",
-              sum(coverage_df$scrape_status == "error"),
-              100 * mean(coverage_df$scrape_status == "error")))
-  cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-  cat("\nNote: Missing data for old/closed facilities is EXPECTED.\n")
-  cat("Use coverage table to analyze missingness patterns vs facility characteristics.\n")
-}
-
-total_time <- difftime(Sys.time(), checkpoint$started_at, units = "hours")
-cat(sprintf("\nTotal scraping time: %.1f hours\n", as.numeric(total_time)))
-cat(sprintf("Facilities scraped: %d\n", checkpoint$completed_count))
-cat(sprintf("Average rate: %.2f facilities/minute\n", 
-            checkpoint$completed_count / (as.numeric(total_time) * 60)))
-
-# Final CSV export (verification - CSVs already saved incrementally with checkpoints)
-log_msg("Verifying final CSV exports...")
-for (rds_file in c(CONFIG$output_inspections, CONFIG$output_violations, 
-                   CONFIG$output_remediation, CONFIG$output_permits)) {
-  filepath <- file.path(CONFIG$efacts_dir, rds_file)
-  if (file.exists(filepath)) {
-    csv_path <- str_replace(filepath, "\\.rds$", ".csv")
-    df <- readRDS(filepath)
-    write_csv(df, csv_path)
-    log_msg(sprintf("  → %s", basename(csv_path)))
-  }
-}
-
-cat("\n")
-cat("Files created in", CONFIG$efacts_dir, ":\n")
-list.files(CONFIG$efacts_dir, pattern = "\\.(rds|csv)$") %>%
-  paste0("  • ", .) %>%
-  cat(sep = "\n")
-
-cat("\n")
-cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-cat("NEXT STEP: Run 03_build_panel.R to construct facility-year panel\n")
-cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
-
-# Clean up checkpoint file on successful completion
-if (checkpoint$completed_count >= checkpoint$total_count) {
-  log_msg("Scrape completed successfully. Checkpoint file retained for reference.")
+  log_msg("JOB COMPLETE.")
 }

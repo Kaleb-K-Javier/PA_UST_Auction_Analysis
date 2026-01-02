@@ -4,7 +4,7 @@
 # ============================================================================
 # Purpose: Generate comprehensive summary statistics and visualizations
 # Note: This is DESCRIPTIVE analysis - no causal claims
-# Updates: Implements multi-format output (HTML/GT & PDF/LaTeX/Kable)
+# Updates: Aligned with output_helpers.R (HTML/GT & PDF/LaTeX/Kable)
 # ============================================================================
 
 cat("\n========================================\n")
@@ -17,19 +17,16 @@ library(scales)
 library(patchwork)
 library(gt)
 library(gtsummary)
-library(kableExtra) # Added for PDF/LaTeX output
 
-# Source helper functions for multi-format saving
+# Source helper functions
 # (Ensure R/functions/output_helpers.R exists)
 if (file.exists("R/functions/output_helpers.R")) {
   source("R/functions/output_helpers.R")
 } else {
-  # Fallback: simple wrappers if helper missing
-  save_figure_multi <- function(p, f, w, h) ggsave(paste0(f, ".png"), p, width=w, height=h)
-  warning("R/functions/output_helpers.R not found. Using basic PNG saving.")
+  stop("CRITICAL ERROR: R/functions/output_helpers.R not found. Please create this file.")
 }
 
-# Load paths and theme
+# Load paths
 if (!exists("paths")) {
   paths <- list(
     processed = "data/processed",
@@ -91,8 +88,8 @@ fig1 <- ggplot(master, aes(x = total_cost)) +
     caption = "Source: USTIF Administrative Data"
   )
 
-# Save Figure 1 (Multi-format)
-save_figure_multi(
+# Save Figure 1
+save_figure(
   plot = fig1, 
   filename = "01_cost_distribution",
   output_dir = paths$figures,
@@ -148,8 +145,8 @@ fig2b <- ggplot(annual_summary, aes(x = claim_year)) +
 # Combine
 fig2 <- fig2a / fig2b
 
-# Save Figure 2 (Multi-format)
-save_figure_multi(
+# Save Figure 2
+save_figure(
   plot = fig2, 
   filename = "02_temporal_trends", 
   output_dir = paths$figures,
@@ -199,8 +196,8 @@ fig3 <- ggplot(top_counties, aes(x = reorder(county, n_claims), y = n_claims)) +
   ) +
   theme(axis.text.y = element_text(size = 9))
 
-# Save Figure 3 (Multi-format)
-save_figure_multi(
+# Save Figure 3
+save_figure(
   plot = fig3, 
   filename = "03_county_distribution", 
   output_dir = paths$figures,
@@ -246,8 +243,8 @@ fig4 <- master %>%
   ) +
   theme(legend.position = "none")
 
-# Save Figure 4 (Multi-format)
-save_figure_multi(
+# Save Figure 4
+save_figure(
   plot = fig4, 
   filename = "04_cost_by_contract_type", 
   output_dir = paths$figures,
@@ -328,33 +325,16 @@ summary_table_obj <- master %>%
   modify_header(label ~ "**Variable**") %>%
   bold_labels()
 
-# 1. Save as HTML (Best with GT)
-html_file <- file.path(paths$tables, "01_summary_statistics.html")
-summary_table_obj %>%
-  as_gt() %>%
-  gtsave(html_file)
-cat(paste("✓ Saved HTML table:", html_file, "\n"))
+# Convert gtsummary to gt object for saving
+gt_summary <- as_gt(summary_table_obj)
 
-# 2. Save as LaTeX/PDF (Best with kableExtra)
-# NOTE: Requires LaTeX installation (TinyTeX)
-tex_file <- file.path(paths$tables, "01_summary_statistics.tex")
-pdf_file <- file.path(paths$tables, "01_summary_statistics.pdf")
-
-# Convert to kable and save LaTeX
-summary_table_obj %>%
-  as_kable_extra(booktabs = TRUE, caption = "Summary Statistics") %>%
-  kableExtra::save_kable(file = tex_file, latex_options = c("striped", "hold_position"))
-cat(paste("✓ Saved TeX table:", tex_file, "\n"))
-
-# Try to compile PDF (if system has LaTeX)
-tryCatch({
-  summary_table_obj %>%
-    as_kable_extra(booktabs = TRUE, caption = "Summary Statistics") %>%
-    kableExtra::save_kable(file = pdf_file, latex_options = c("striped", "hold_position"))
-  cat(paste("✓ Saved PDF table:", pdf_file, "\n"))
-}, error = function(e) {
-  cat("! PDF generation failed (LaTeX missing or error). See .tex file instead.\n")
-})
+# Save using helper (handles HTML, LaTeX, PDF)
+save_gt_table(
+  table = gt_summary,
+  filename = "01_summary_statistics",
+  output_dir = paths$tables,
+  formats = c("html", "latex", "pdf")
+)
 
 # ============================================================================
 # SECTION 7: Export Results

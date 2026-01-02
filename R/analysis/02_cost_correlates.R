@@ -9,7 +9,7 @@
 # conditional correlations - they should NOT be interpreted as causal effects.
 # Selection into auction vs. non-auction procurement is endogenous.
 #
-# Updates: Implements multi-format output (HTML, LaTeX, PDF, PNG)
+# Updates: Aligned with output_helpers.R (HTML, LaTeX, PDF, PNG)
 # ============================================================================
 
 cat("\n========================================\n")
@@ -22,16 +22,13 @@ library(fixest)
 library(modelsummary)
 library(scales)
 library(patchwork)
-library(kableExtra) # For PDF table generation
 
-# Source helper functions for multi-format saving
+# Source helper functions
 # (Ensure R/functions/output_helpers.R exists)
 if (file.exists("R/functions/output_helpers.R")) {
   source("R/functions/output_helpers.R")
 } else {
-  # Fallback: simple wrappers if helper missing
-  save_figure_multi <- function(p, f, w, h) ggsave(paste0(f, ".png"), p, width=w, height=h)
-  warning("R/functions/output_helpers.R not found. Using basic PNG saving.")
+  stop("CRITICAL ERROR: R/functions/output_helpers.R not found. Please create this file.")
 }
 
 # Load paths
@@ -228,31 +225,21 @@ table_notes <- c(
   "NOTE: Coefficients represent conditional correlations, NOT causal effects"
 )
 
-# 1. Save HTML (Best for viewing)
-modelsummary(
-  models_list,
+# Save using helper (handles HTML and LaTeX)
+save_modelsummary(
+  models = models_list,
+  filename = "02_cost_correlates_regression",
+  output_dir = paths$tables,
+  formats = c("html", "latex"),
+  # Modelsummary arguments
   stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
   coef_map = coef_map,
   gof_map = c("nobs", "r.squared", "adj.r.squared"),
   title = "Correlates of Remediation Costs (Descriptive)",
-  notes = table_notes,
-  output = file.path(paths$tables, "02_cost_correlates_regression.html")
+  notes = table_notes
 )
-cat("✓ Saved: output/tables/02_cost_correlates_regression.html\n")
 
-# 2. Save LaTeX (For academic appendix)
-modelsummary(
-  models_list,
-  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
-  coef_map = coef_map,
-  gof_map = c("nobs", "r.squared", "adj.r.squared"),
-  title = "Correlates of Remediation Costs (Descriptive)",
-  output = file.path(paths$tables, "02_cost_correlates_regression.tex")
-)
-cat("✓ Saved: output/tables/02_cost_correlates_regression.tex\n")
-
-# 3. Save PDF (Optional - requires TinyTeX)
-# modelsummary can output PDF directly via kableExtra
+# Attempt PDF Save manually (helper defaults to html/latex for modelsummary)
 tryCatch({
   modelsummary(
     models_list,
@@ -262,9 +249,9 @@ tryCatch({
     title = "Correlates of Remediation Costs (Descriptive)",
     output = file.path(paths$tables, "02_cost_correlates_regression.pdf")
   )
-  cat("✓ Saved: output/tables/02_cost_correlates_regression.pdf\n")
+  cat(paste("✓ Saved:", file.path(paths$tables, "02_cost_correlates_regression.pdf"), "\n"))
 }, error = function(e) {
-  cat("! PDF Table generation failed (LaTeX/TinyTeX missing). See .tex file.\n")
+  cat("! PDF generation failed (likely LaTeX missing). HTML/TeX saved successfully.\n")
 })
 
 # Print to console
@@ -304,8 +291,8 @@ fig_coef <- ggplot(coef_data, aes(x = reorder(term_clean, estimate), y = estimat
     caption = "Note: 95% confidence intervals shown. These are descriptive correlations, not causal effects."
   )
 
-# Save Figure 5 (Multi-format)
-save_figure_multi(
+# Save Figure 5
+save_figure(
   plot = fig_coef,
   filename = "05_coefficient_plot",
   output_dir = paths$figures,
@@ -336,8 +323,8 @@ fig_hetero <- analysis_data %>%
   ) +
   theme(legend.position = "bottom")
 
-# Save Figure 6 (Multi-format)
-save_figure_multi(
+# Save Figure 6
+save_figure(
   plot = fig_hetero,
   filename = "06_heterogeneity_by_era",
   output_dir = paths$figures,

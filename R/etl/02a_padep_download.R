@@ -274,6 +274,9 @@ for (endpoint_name in names(ENDPOINTS)) {
   endpoint <- ENDPOINTS[[endpoint_name]]
   output_path <- file.path(paths$padep, endpoint$output)
   
+  # SKIP if file exists and is recent (optional optimization)
+  # For now, we overwrite to ensure freshness
+  
   cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"))
   cat(sprintf("Downloading: %s\n", endpoint$name))
   cat(sprintf("Source: %s\n", endpoint$url))
@@ -333,7 +336,6 @@ log_msg("Building unified facility linkage table...")
 
 # Load downloaded data
 pasda_active <- tryCatch(
-
   readRDS(file.path(paths$padep, "pasda_tanks_active.rds")),
   error = function(e) NULL
 )
@@ -347,44 +349,98 @@ pasda_inactive <- tryCatch(
 if (!is.null(pasda_active) || !is.null(pasda_inactive)) {
   
   # Standardize column names across sources
-  # Uses any_of() to handle missing columns gracefully
+  # UPDATED: Handles specific PASDA/ArcGIS truncated names (attributes_*)
   standardize_facility_cols <- function(df, status_label) {
     if (is.null(df)) return(NULL)
     
-    # Check which key columns exist
-    available_cols <- names(df)
-    has_permit <- any(c("facility_i", "facility_id") %in% available_cols)
-    has_efacts <- any(c("primary_fa", "primary_facility_id") %in% available_cols)
-    
-    if (!has_permit) {
-      log_msg(sprintf("WARNING: No permit number column found in %s data", status_label), "WARN")
-    }
-    if (!has_efacts) {
-      log_msg(sprintf("WARNING: No eFACTS facility ID column (PRIMARY_FA) found in %s data", status_label), "WARN")
-    }
+    # Debug print to confirm input
+    # print(names(df))
     
     result <- df %>%
       select(
-        permit_number = any_of(c("facility_i", "facility_id")),
-        efacts_facility_id = any_of(c("primary_fa", "primary_facility_id")),
-        site_id = any_of(c("site_id")),
-        facility_name = any_of(c("facility_n", "facility_name")),
-        address = any_of(c("facility_a", "facility_address")),
-        city = any_of(c("facility_2", "facility_city")),
-        county = any_of(c("facility_c", "county")),
-        municipality = any_of(c("facility_m", "municipality")),
-        zip = any_of(c("facility_z", "zip")),
-        latitude = any_of(c("latitude")),
-        longitude = any_of(c("longitude")),
-        owner_id = any_of(c("tank_owner")),
-        owner_name = any_of(c("tank_own_1", "owner_name"))
+        # Permit Number (The "ID" on the tank sticker)
+        # Try full names first, then truncated 'attributes_' versions
+        permit_number = any_of(c(
+          "attributes_facility_id", 
+          "attributes_facility_i",  # Common truncation
+          "facility_id", 
+          "facility_i"
+        )),
+        
+        # eFACTS ID (The internal DB key)
+        efacts_facility_id = any_of(c(
+          "attributes_primary_facility_id", 
+          "attributes_primary_fa",  # Common truncation
+          "primary_facility_id", 
+          "primary_fa"
+        )),
+        
+        # Site ID
+        site_id = any_of(c("attributes_site_id", "site_id")),
+        
+        # Facility Name
+        facility_name = any_of(c(
+          "attributes_facility_name", 
+          "attributes_facility_n", 
+          "facility_name", 
+          "facility_n"
+        )),
+        
+        # Address
+        address = any_of(c(
+          "attributes_facility_address1", 
+          "attributes_facility_a", 
+          "facility_address1", 
+          "facility_a"
+        )),
+        
+        # City
+        city = any_of(c(
+          "attributes_facility_city", 
+          "attributes_facility_c", # Often truncated to _c
+          "facility_city"
+        )),
+        
+        # County
+        county = any_of(c(
+          "attributes_facility_county", 
+          "facility_county"
+        )),
+        
+        # Municipality
+        municipality = any_of(c(
+          "attributes_facility_municipality", 
+          "attributes_facility_m", 
+          "facility_municipality"
+        )),
+        
+        # Zip
+        zip = any_of(c(
+          "attributes_facility_zip", 
+          "attributes_facility_z", 
+          "facility_zip"
+        )),
+        
+        # Coordinates
+        latitude = any_of(c("attributes_latitude", "latitude")),
+        longitude = any_of(c("attributes_longitude", "longitude")),
+        
+        # Owner Info
+        owner_id = any_of(c("attributes_tank_owner_id", "attributes_tank_owner", "tank_owner_id")),
+        owner_name = any_of(c(
+          "attributes_tank_owner_name", 
+          "attributes_tank_own_1", 
+          "owner_name"
+        ))
       ) %>%
       mutate(registration_status = status_label)
     
-    # Ensure efacts_facility_id is character for consistent handling
+    # Ensure IDs are character
     if ("efacts_facility_id" %in% names(result)) {
-      result <- result %>%
-        mutate(efacts_facility_id = as.character(efacts_facility_id))
+      result <- result %>% mutate(efacts_facility_id = as.character(efacts_facility_id))
+    }
+    if ("permit_number" %in% names(result)) {
+      result <- result %>% mutate(permit_number = as.character(permit_number))
     }
     
     return(result)
@@ -395,11 +451,12 @@ if (!is.null(pasda_active) || !is.null(pasda_inactive)) {
   
   # Combine, keeping active status if facility appears in both
   linkage_table <- bind_rows(linkage_active, linkage_inactive) %>%
+    # Filter out records where permit_number is missing (crucial fix)
+    filter(!is.na(permit_number)) %>%
     group_by(permit_number) %>%
     arrange(desc(registration_status == "active")) %>%
     slice(1) %>%
-    ungroup() %>%
-    filter(!is.na(permit_number))
+    ungroup()
   
   # Save linkage table (RDS + CSV)
   saveRDS(linkage_table, file.path(paths$padep, "facility_linkage_table.rds"))
@@ -411,7 +468,7 @@ if (!is.null(pasda_active) || !is.null(pasda_inactive)) {
   n_with_efacts <- sum(!is.na(linkage_table$efacts_facility_id))
   if (n_with_efacts == 0) {
     log_msg("CRITICAL: No facilities have eFACTS IDs - 02b scraping will fail!", "ERROR")
-    log_msg("Check that PASDA data contains PRIMARY_FA column", "ERROR")
+    log_msg("Check column mapping in standardize_facility_cols()", "ERROR")
   } else if (n_with_efacts < nrow(linkage_table) * 0.5) {
     log_msg(sprintf("WARNING: Only %d/%d (%.1f%%) facilities have eFACTS IDs", 
                     n_with_efacts, nrow(linkage_table), 
