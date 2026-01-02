@@ -76,6 +76,93 @@ Place the following in `data/raw/`:
 - `Tank_Construction_Closed.xlsx`
 - `USTIF_Auction_Q_A.txt`
 
+
+## Data Linkage Architecture
+
+### Known Limitations
+
+⚠️ **Critical Linkage Gap**: USTIF claims data does not contain facility permit numbers. 
+The join between claims and tank characteristics (`department` = `facility_id`) in 
+`04_construct_analysis_panel.R` is semantically invalid and produces ~21% spurious matches.
+
+**Impact**: Tank-level covariates (age, wall type, capacity) are not reliably linked to claims.
+
+**Workaround Options**:
+1. Request USTIF export with `permit_number` field
+2. Implement fuzzy matching on `claimant_name` + `location_desc`
+3. Proceed with claims-only analysis (current default)
+
+### Data Flow Diagram
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           DATA PIPELINE FLOW                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐                │
+│  │ USTIF Excel  │     │ PA DEP APIs  │     │ eFACTS Web   │                │
+│  │ (Claims/     │     │ (ArcGIS REST)│     │ (Scraper)    │                │
+│  │  Contracts/  │     │              │     │              │                │
+│  │  Tanks)      │     │              │     │              │                │
+│  └──────┬───────┘     └──────┬───────┘     └──────┬───────┘                │
+│         │                    │                    │                         │
+│         ▼                    ▼                    ▼                         │
+│  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐                │
+│  │ 01_load_     │     │ 02a_padep_   │     │ 02b_efacts_  │                │
+│  │ ustif_data.R │     │ download.R   │     │ scrape.R     │                │
+│  └──────┬───────┘     └──────┬───────┘     └──────┬───────┘                │
+│         │                    │                    │                         │
+│         ▼                    ▼                    ▼                         │
+│  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐                │
+│  │claims_clean  │     │facility_     │     │efacts_*      │                │
+│  │contracts_    │     │linkage_table │     │(9 tables)    │                │
+│  │clean         │     │              │     │              │                │
+│  │tanks_clean   │     │              │     │              │                │
+│  └──────┬───────┘     └──────┬───────┘     └──────┬───────┘                │
+│         │                    │                    │                         │
+│         │    ┌───────────────┴────────────────────┘                         │
+│         │    │                                                              │
+│         │    │  permit_number ↔ efacts_facility_id                          │
+│         │    │  (WORKING LINK)                                              │
+│         │    │                                                              │
+│         ▼    ▼                                                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                    03_merge_master_dataset.R                          │  │
+│  │                                                                       │  │
+│  │  claims ←─JOIN─→ contracts  ✓ (claim_number)                         │  │
+│  │  claims ←─????─→ tanks      ✗ (department ≠ facility_id)             │  │
+│  │  tanks  ←─JOIN─→ linkage    ✓ (facility_id = permit_number)          │  │
+│  │  linkage←─JOIN─→ efacts     ✓ (efacts_facility_id)                   │  │
+│  │                                                                       │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Server Deployment for eFACTS Scrape
+
+**Estimated Runtime**: 8-12 days for full PA universe (~35,000 facilities)
+
+**Resource Requirements**:
+- RAM: 2GB minimum
+- Disk: 5GB for output CSVs
+- Network: Stable connection (scraper has retry logic)
+
+**Checkpoint System**: 
+- Saves every 50 facilities
+- Auto-resumes from `scrape_checkpoint_v21.rds`
+- Safe to interrupt with Ctrl+C
+
+**Recommended**: Run in `screen` or `tmux` session on remote server.
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| `HTTP 429 Too Many Requests` | Increase `CONFIG$delay_facility` to 2.0 seconds |
+| `JSON parse error` | Check `scrape_log.txt`; retry individual facility manually |
+| `CRITICAL: No facilities have eFACTS IDs` | Verify `02a` ran successfully; check `facility_linkage_table.csv` |
+| Low match rate in `04_construct_analysis_panel.R` | Expected behavior; see Linkage Limitations above |
+
 ### 4. Run Pipeline
 
 ```r
