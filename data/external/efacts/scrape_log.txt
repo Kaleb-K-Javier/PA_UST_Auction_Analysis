@@ -1,0 +1,29 @@
+[2026-01-05 10:01:28] INFO: STARTING FRESH SCRAPE
+[2026-01-05 10:01:28] INFO: Scraping 5 facilities (100.0% remaining)
+[2026-01-05 10:01:31] WARN: INTERRUPT DETECTED: Emergency save...
+[2026-01-05 10:04:33] INFO: RESUMING: Skipping 0 previously completed facilities
+[2026-01-05 10:04:33] INFO: Scraping 5 facilities (100.0% remaining)
+[2026-01-05 10:04:35] WARN: INTERRUPT DETECTED: Emergency save...
+[2026-01-05 10:04:54] INFO: RESUMING: Skipping 0 previously completed facilities
+[2026-01-05 10:04:54] INFO: Scraping 5 facilities (100.0% remaining)
+[2026-01-05 10:05:44] INFO: Final save: 5 facilities
+[2026-01-05 10:05:44] INFO: SCRAPE COMPLETE
+[2026-01-05 10:05:44] INFO: Total scraped: 5 facilities
+[2026-01-05 10:05:44] WARN: INTERRUPT DETECTED: Emergency save...
+[2026-01-05 10:07:37] INFO: STARTING FRESH SCRAPE
+[2026-01-05 10:07:37] INFO: Scraping 5 facilities (100.0% remaining)
+[2026-01-05 10:08:27] INFO: Final save: 5 facilities
+[2026-01-05 10:08:27] INFO: SCRAPE COMPLETE
+[2026-01-05 10:08:27] INFO: Total scraped: 5 facilities
+[2026-01-05 10:08:27] WARN: INTERRUPT DETECTED: Emergency save...
+[2026-01-05 10:17:55] INFO: STARTING FRESH SCRAPE
+[2026-01-05 10:17:55] INFO: Scraping 38552 facilities (100.0% remaining)
+[2026-01-05 10:34:53] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 10:55:54] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 11:13:00] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 11:25:38] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 11:42:03] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 12:10:44] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 12:35:15] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 12:56:06] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 13:24:29] WARN: INTERRUPT DETECTED: Emergency save...

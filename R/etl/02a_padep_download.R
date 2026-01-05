@@ -47,14 +47,12 @@ suppressPackageStartupMessages({
   library(janitor)
 })
 
-# Paths configuration (relative to project root: PA_UST_Auction_Analysis/)
-if (!exists("paths")) {
-  paths <- list(
-    external = "data/external",
-    padep = "data/external/padep",    # Created by this script
-    processed = "data/processed"
-  )
-}
+# Paths configuration - FORCE OVERWRITE for this script's requirements
+paths <- list(
+  external = "data/external",
+  padep = "data/external/padep",
+  processed = "data/processed"
+)
 
 # Create directory structure
 for (p in paths) {

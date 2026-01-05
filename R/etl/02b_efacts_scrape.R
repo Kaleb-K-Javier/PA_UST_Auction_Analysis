@@ -885,19 +885,19 @@ run_scraper <- function(facility_ids) {
     fac_res <- scrape_facility_page(fid)
     
     # Initialize coverage record
-    cov_rec <- get_template("coverage")
-    cov_rec[1, `:=`(
-      efacts_facility_id = fid,
-      found_meta = !is.null(fac_res$meta_dt),
-      n_tanks = if (!is.null(fac_res$tanks_dt)) nrow(fac_res$tanks_dt) else 0L,
-      n_inspections = if (!is.null(fac_res$insp_dt)) nrow(fac_res$insp_dt) else 0L,
-      n_violations = 0L,
-      n_permits = 0L,
-      n_remediation = if (!is.null(fac_res$rem_dt)) nrow(fac_res$rem_dt) else 0L,
-      status = if (is.null(fac_res$error)) "success" else "error",
-      scraped_at = as.character(Sys.time())
-    )]
-    
+# Initialize coverage record - build directly instead of template
+cov_rec <- data.table(
+  efacts_facility_id = as.character(fid),
+  found_meta = !is.null(fac_res$meta_dt),
+  n_tanks = if (!is.null(fac_res$tanks_dt)) as.integer(nrow(fac_res$tanks_dt)) else 0L,
+  n_inspections = if (!is.null(fac_res$insp_dt)) as.integer(nrow(fac_res$insp_dt)) else 0L,
+  n_violations = 0L,
+  n_permits = 0L,
+  n_remediation = if (!is.null(fac_res$rem_dt)) as.integer(nrow(fac_res$rem_dt)) else 0L,
+  status = as.character(if (is.null(fac_res$error)) "success" else "error"),
+  scraped_at = as.character(Sys.time())
+)
+
     if (is.null(fac_res$error)) {
       # Store facility-level data
       if (!is.null(fac_res$meta_dt)) batch$meta[[length(batch$meta) + 1]] <- fac_res$meta_dt
@@ -911,7 +911,7 @@ run_scraper <- function(facility_ids) {
           v_dt <- scrape_violation_detail(vid, fid)
           if (nrow(v_dt) > 0) {
             batch$viol[[length(batch$viol) + 1]] <- v_dt
-            cov_rec[1, n_violations := n_violations + nrow(v_dt)]
+            cov_rec[, n_violations := n_violations + nrow(v_dt)]
           }
           Sys.sleep(CONFIG$delay_detail)
         }
@@ -926,7 +926,7 @@ run_scraper <- function(facility_ids) {
           }
           if (nrow(p_res$tasks) > 0) {
             batch$perm_tasks[[length(batch$perm_tasks) + 1]] <- p_res$tasks
-            cov_rec[1, n_permits := n_permits + nrow(p_res$tasks)]
+           cov_rec[, n_permits := n_permits + nrow(p_res$tasks)]
           }
           Sys.sleep(CONFIG$delay_detail)
         }
