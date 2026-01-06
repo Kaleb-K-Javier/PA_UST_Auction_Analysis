@@ -1,15 +1,16 @@
 # R/etl/02b_efacts_scrape.R
 # ============================================================================
-# Pennsylvania UST Analysis - ETL Step 2b: eFACTS Scraper v22 (Production)
+# Pennsylvania UST Analysis - ETL Step 2b: eFACTS Scraper v23 (Production)
 # ============================================================================
 # Purpose: Scrape PA DEP eFACTS compliance system for facility-level data
 # 
-# FIXES IMPLEMENTED (v22):
+# FIXES IMPLEMENTED (v23):
 #   1. Schema enforcement in save_batch() with fill=TRUE and use.names=TRUE
 #   2. Inspection table: Explicit ID extraction from "Type (ID)" format
 #   3. Permit tasks: Ghost row filtering (empty task names)
 #   4. Violations: Full enforcement data parsing with state machine
 #   5. Checkpoint/resume with atomic saves
+#   6. ERROR HANDLING FIX: Direct data.table construction instead of template[1, :=]
 #
 # Input:  facility_linkage_table.csv (from 02a) → efacts_facility_id column
 # Output: 9 normalized CSVs in data/external/efacts/
@@ -23,8 +24,9 @@
 
 cat("\n")
 cat("╔══════════════════════════════════════════════════════════════════════╗\n")
-cat("║  ETL Step 2b: eFACTS Scraper v22 (Production Ready)                 ║\n")
-cat("║  Fixes: Schema enforcement, ID splitting, ghost row removal         ║\n")
+cat("║  ETL Step 2b: eFACTS Scraper v23 (Production Ready)                 ║\n")
+cat("║  Fixes: Schema enforcement, ID splitting, ghost row removal,        ║\n")
+cat("║         error handling data.table construction                      ║\n")
 cat("╚══════════════════════════════════════════════════════════════════════╝\n\n")
 
 suppressPackageStartupMessages({
@@ -35,35 +37,40 @@ suppressPackageStartupMessages({
   library(stringr)
 })
 
+
+
 # ============================================================================
-# 1. CONFIGURATION
+# 1. CONFIGURATION (UPDATED FOR PARALLEL WORKERS)
 # ============================================================================
 
+# Define Worker ID (Default to "main" if not specified)
+if (!exists("WORKER_ID")) WORKER_ID <- "main"
+
 CONFIG <- list(
-  # Timing (seconds) - increase for production stability
-  delay_facility = 1.5,      # Between facility pages
-  delay_detail = 0.75,       # Between detail pages (violations, permits, remediation)
+  # Timing
+  delay_facility = 1.5,
+  delay_detail = 0.75,
   
   # Batch settings
-  batch_size = 100,          # Checkpoint every N facilities
-  timeout = 45,              # HTTP request timeout
-  max_retries = 3,           # Retries per request
+  batch_size = 100,
+  timeout = 45,
+  max_retries = 3,
   
   # Feature flags
   scrape_violations = TRUE,
   scrape_permit_details = TRUE,
   scrape_remediation_details = TRUE,
   
-  # Paths
+  # Dynamic Paths (Append WORKER_ID to prevent file conflicts)
   efacts_dir = "data/external/efacts",
-  checkpoint_file = "data/external/efacts/scrape_checkpoint_v22.rds",
-  log_file = "data/external/efacts/scrape_log.txt"
+  checkpoint_file = sprintf("data/external/efacts/scrape_checkpoint_v23_%s.rds", WORKER_ID),
+  log_file = sprintf("data/external/efacts/scrape_log_%s.txt", WORKER_ID),
+  
+  # Function to generate unique output filenames
+  get_outfile = function(base_name) {
+    return(sprintf("efacts_%s_%s", base_name, WORKER_ID))
+  }
 )
-
-# Create output directory
-if (!dir.exists(CONFIG$efacts_dir)) {
-  dir.create(CONFIG$efacts_dir, recursive = TRUE)
-}
 
 # ============================================================================
 # 2. CANONICAL SCHEMA DEFINITIONS
@@ -284,7 +291,7 @@ fetch_page <- function(url, retries = CONFIG$max_retries) {
       res <- GET(
         url,
         timeout(CONFIG$timeout),
-        add_headers("User-Agent" = "R-USTIF-Research/2.2")
+        add_headers("User-Agent" = "R-USTIF-Research/2.3")
       )
       
       if (status_code(res) == 200) {
@@ -778,7 +785,7 @@ scrape_remediation_detail <- function(lrpact_id, facility_id) {
 }
 
 # ============================================================================
-# 11. BATCH SAVE (FIX: Schema enforcement on append)
+# 11. BATCH SAVE (FIX: Schema enforcement on append + Parallel Support)
 # ============================================================================
 
 save_batch <- function(batch) {
@@ -790,8 +797,16 @@ save_batch <- function(batch) {
     combined_dt <- rbindlist(data_list, fill = TRUE, use.names = TRUE)
     combined_dt[, batch_import_date := as.character(Sys.time())]
     
-    rds_path <- file.path(CONFIG$efacts_dir, paste0(file_name, ".rds"))
-    csv_path <- file.path(CONFIG$efacts_dir, paste0(file_name, ".csv"))
+    # ------------------------------------------------------------------
+    # PARALLELIZATION FIX: Append WORKER_ID if it exists
+    # This prevents race conditions when running multiple scrapers.
+    # Defaults to empty string (original behavior) if WORKER_ID is missing.
+    # ------------------------------------------------------------------
+    suffix <- if (exists("WORKER_ID")) paste0("_", WORKER_ID) else ""
+    final_name <- paste0(file_name, suffix)
+    
+    rds_path <- file.path(CONFIG$efacts_dir, paste0(final_name, ".rds"))
+    csv_path <- file.path(CONFIG$efacts_dir, paste0(final_name, ".csv"))
     
     # FIX: If file exists, load and merge with schema enforcement
     if (file.exists(rds_path)) {
@@ -830,6 +845,7 @@ save_batch <- function(batch) {
   save_single(batch$cov, "coverage", "efacts_facility_coverage")
   save_single(batch$err, "errors", "efacts_scrape_errors")
 }
+
 
 # ============================================================================
 # 12. MAIN SCRAPER LOOP
@@ -884,19 +900,18 @@ run_scraper <- function(facility_ids) {
     # ---- SCRAPE FACILITY PAGE ----
     fac_res <- scrape_facility_page(fid)
     
-    # Initialize coverage record
-# Initialize coverage record - build directly instead of template
-cov_rec <- data.table(
-  efacts_facility_id = as.character(fid),
-  found_meta = !is.null(fac_res$meta_dt),
-  n_tanks = if (!is.null(fac_res$tanks_dt)) as.integer(nrow(fac_res$tanks_dt)) else 0L,
-  n_inspections = if (!is.null(fac_res$insp_dt)) as.integer(nrow(fac_res$insp_dt)) else 0L,
-  n_violations = 0L,
-  n_permits = 0L,
-  n_remediation = if (!is.null(fac_res$rem_dt)) as.integer(nrow(fac_res$rem_dt)) else 0L,
-  status = as.character(if (is.null(fac_res$error)) "success" else "error"),
-  scraped_at = as.character(Sys.time())
-)
+    # Initialize coverage record - build directly instead of template modification
+    cov_rec <- data.table(
+      efacts_facility_id = as.character(fid),
+      found_meta = !is.null(fac_res$meta_dt),
+      n_tanks = if (!is.null(fac_res$tanks_dt)) as.integer(nrow(fac_res$tanks_dt)) else 0L,
+      n_inspections = if (!is.null(fac_res$insp_dt)) as.integer(nrow(fac_res$insp_dt)) else 0L,
+      n_violations = 0L,
+      n_permits = 0L,
+      n_remediation = if (!is.null(fac_res$rem_dt)) as.integer(nrow(fac_res$rem_dt)) else 0L,
+      status = as.character(if (is.null(fac_res$error)) "success" else "error"),
+      scraped_at = as.character(Sys.time())
+    )
 
     if (is.null(fac_res$error)) {
       # Store facility-level data
@@ -926,7 +941,7 @@ cov_rec <- data.table(
           }
           if (nrow(p_res$tasks) > 0) {
             batch$perm_tasks[[length(batch$perm_tasks) + 1]] <- p_res$tasks
-           cov_rec[, n_permits := n_permits + nrow(p_res$tasks)]
+            cov_rec[, n_permits := n_permits + nrow(p_res$tasks)]
           }
           Sys.sleep(CONFIG$delay_detail)
         }
@@ -947,13 +962,15 @@ cov_rec <- data.table(
       }
       
     } else {
-      # Log error
-      err_rec <- get_template("errors")
-      err_rec[1, `:=`(
-        efacts_facility_id = fid,
-        error_msg = fac_res$error,
+      # ============================================================
+      # FIX v23: Direct data.table construction for error logging
+      # Previously used get_template() + [1, :=] which fails on 0-row dt
+      # ============================================================
+      err_rec <- data.table(
+        efacts_facility_id = as.character(fid),
+        error_msg = as.character(fac_res$error),
         error_time = as.character(Sys.time())
-      )]
+      )
       batch$err[[length(batch$err) + 1]] <- err_rec
     }
     
@@ -1065,11 +1082,35 @@ get_scrape_status <- function() {
   invisible(list(completed = completed, total = total))
 }
 
-cat("\n✓ eFACTS Scraper v22 loaded successfully.\n")
+# ============================================================================
+# 15. UTILITY: MIGRATE FROM V22 CHECKPOINT (if needed)
+# ============================================================================
+
+migrate_checkpoint_v22_to_v23 <- function() {
+  old_cp_file <- "data/external/efacts/scrape_checkpoint_v22.rds"
+  new_cp_file <- CONFIG$checkpoint_file
+  
+  if (file.exists(old_cp_file) && !file.exists(new_cp_file)) {
+    old_cp <- readRDS(old_cp_file)
+    saveRDS(old_cp, new_cp_file)
+    log_msg(sprintf("Migrated checkpoint: %d completed IDs from v22 to v23", 
+                    length(old_cp$completed_ids)))
+    return(TRUE)
+  } else if (file.exists(old_cp_file) && file.exists(new_cp_file)) {
+    log_msg("Both v22 and v23 checkpoints exist. Using v23.", "WARN")
+    return(FALSE)
+  } else {
+    log_msg("No v22 checkpoint to migrate.")
+    return(FALSE)
+  }
+}
+
+cat("\n✓ eFACTS Scraper v23 loaded successfully.\n")
 cat("\nUsage:\n")
 cat("  linkage <- read.csv('data/external/padep/facility_linkage_table.csv')\n")
 cat("  ids <- unique(linkage$efacts_facility_id[!is.na(linkage$efacts_facility_id)])\n")
 cat("  run_scraper(ids)\n")
 cat("\nUtilities:\n")
-cat("  get_scrape_status()  - Check progress\n")
-cat("  reset_checkpoint()   - Start over\n\n")
+cat("  get_scrape_status()           - Check progress\n")
+cat("  reset_checkpoint()            - Start over\n")
+cat("  migrate_checkpoint_v22_to_v23() - Migrate from v22 checkpoint\n\n")

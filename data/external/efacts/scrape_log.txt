@@ -27,3 +27,10 @@
 [2026-01-05 12:35:15] INFO: Checkpoint: Saving batch of 100 facilities
 [2026-01-05 12:56:06] INFO: Checkpoint: Saving batch of 100 facilities
 [2026-01-05 13:24:29] WARN: INTERRUPT DETECTED: Emergency save...
+[2026-01-05 14:13:26] INFO: Migrated checkpoint: 876 completed IDs from v22 to v23
+[2026-01-05 14:13:32] INFO: RESUMING: Skipping 876 previously completed facilities
+[2026-01-05 14:13:32] INFO: Scraping 37676 facilities (97.7% remaining)
+[2026-01-05 14:47:40] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 15:15:01] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 15:44:19] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 16:11:32] WARN: INTERRUPT DETECTED: Emergency save...
