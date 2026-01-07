@@ -224,66 +224,103 @@ panel_step2 <- panel_step1 %>%
 
 cat(paste("  After collapsing to claim level:", nrow(panel_step2), "\n"))
 
-# Step 4b: Join with tanks (on department = facility_id)
+# ============================================================================
+# STEP 4B: JOIN WITH PA DEP FACILITY LINKAGE (REPLACES TANK JOIN)
+# ============================================================================
+# Source: facility_linkage_table.csv from 02a_padep_download.R
+# Expected match rate: >90% (per README architecture)
+
+cat("Joining with PA DEP facility linkage table...\n")
+
+# Load PA DEP facility linkage (authoritative source)
+linkage_path <- "data/external/padep/facility_linkage_table.csv"
+
+if (!file.exists(linkage_path)) {
+  stop(paste0(
+    "CRITICAL: facility_linkage_table.csv not found.\n",
+    "Run R/etl/02a_padep_download.R first."
+  ))
+}
+
+linkage <- fread(linkage_path)
+
+cat(sprintf("  Linkage table loaded: %d facilities\n", nrow(linkage)))
+
+# Join claims to facility universe via permit_number = department
 panel_step3 <- panel_step2 %>%
   left_join(
-    tanks_facility,
-    by = c("department" = "facility_id")
+    linkage %>% 
+      select(permit_number, efacts_facility_id, site_id, 
+             latitude, longitude, registration_status, owner_name),
+    by = c("department" = "permit_number")
   )
 
-# Diagnostic: Match rate
-n_matched <- sum(!is.na(panel_step3$n_tanks))
-match_rate <- n_matched / nrow(panel_step3) * 100
+# DIAGNOSTIC: Match rate validation
+n_matched <- sum(!is.na(panel_step3$efacts_facility_id))
+match_rate <- n_matched / nrow(panel_step3)
 
-cat(paste("  After claims-tanks join:", nrow(panel_step3), "\n"))
-cat(paste("  Tank data match rate:", round(match_rate, 1), "%\n"))
-cat(paste("  WARNING: Low match rate is a known data limitation.\n\n"))
+cat(sprintf("  Facility linkage match rate: %d/%d (%.1f%%)\n", 
+            n_matched, nrow(panel_step3), 100 * match_rate))
+
+# FAIL if match rate below threshold
+if (match_rate < 0.85) {
+  warning(sprintf(
+    "LOW MATCH RATE: %.1f%% < 85%% threshold.\n
+    Check that claims.department format matches linkage.permit_number (XX-XXXXX)",
+    100 * match_rate
+  ))
+}
+
+stopifnot(match_rate > 0.50)  # Hard fail if catastrophically low
+
 
 # ============================================================================
 # STEP 5: CREATE INSTRUMENT - ADJUSTER LENIENCY (LEAVE-ONE-OUT)
 # ============================================================================
-# Instrument: Adjuster's propensity to use PFP auctions
-# Leave-one-out: Exclude current claim from adjuster's mean
+# FIX: Filter to valid adjusters BEFORE computing LOO to avoid denominator bias
 
 cat("Constructing adjuster leniency instrument...\n")
 
-# First, count claims per adjuster
+# STEP 5A: Identify valid adjusters FIRST (>10 claims for stable instrument)
 adjuster_counts <- panel_step3 %>%
   filter(!is.na(adjuster)) %>%
   count(adjuster, name = "adjuster_n_claims")
 
-# Filter adjusters with sufficient claims (>10 for stable instrument)
 valid_adjusters <- adjuster_counts %>%
   filter(adjuster_n_claims > 10) %>%
   pull(adjuster)
 
-cat(paste("  Total unique adjusters:", n_distinct(panel_step3$adjuster, na.rm = TRUE), "\n"))
-cat(paste("  Adjusters with >10 claims:", length(valid_adjusters), "\n"))
+cat(sprintf("  Total unique adjusters: %d\n", n_distinct(panel_step3$adjuster, na.rm = TRUE)))
+cat(sprintf("  Adjusters with >10 claims (valid for IV): %d\n", length(valid_adjusters)))
 
-# Calculate leave-one-out mean for each observation
+# STEP 5B: Compute LOO on FULL panel, then flag validity
 panel_with_iv <- panel_step3 %>%
   left_join(adjuster_counts, by = "adjuster") %>%
   group_by(adjuster) %>%
   mutate(
-    # Sum of is_PFP for this adjuster (excluding current obs)
+    # Sum of is_PFP for this adjuster
     adjuster_pfp_sum = sum(is_PFP, na.rm = TRUE),
+    # Leave-one-out: subtract current observation
     adjuster_pfp_sum_loo = adjuster_pfp_sum - as.numeric(is_PFP),
-    
-    # Leave-one-out mean
-    adjuster_leniency = ifelse(
+    # LOO mean (only valid if adjuster has >1 claim)
+    adjuster_leniency = if_else(
       adjuster_n_claims > 1,
       adjuster_pfp_sum_loo / (adjuster_n_claims - 1),
       NA_real_
     )
   ) %>%
   ungroup() %>%
-  # Flag valid instrument observations
+  # Flag observations valid for IV estimation
   mutate(
-    has_valid_iv = adjuster %in% valid_adjusters & !is.na(adjuster_leniency)
+    has_valid_iv = (adjuster %in% valid_adjusters) & !is.na(adjuster_leniency)
   ) %>%
+  # Clean up intermediate columns
   select(-adjuster_pfp_sum, -adjuster_pfp_sum_loo)
 
-cat(paste("  Observations with valid IV:", sum(panel_with_iv$has_valid_iv), "\n\n"))
+cat(sprintf("  Observations with valid IV: %d (%.1f%%)\n", 
+            sum(panel_with_iv$has_valid_iv),
+            100 * mean(panel_with_iv$has_valid_iv)))
+
 
 # ============================================================================
 # STEP 6: FINAL VARIABLE PREPARATION

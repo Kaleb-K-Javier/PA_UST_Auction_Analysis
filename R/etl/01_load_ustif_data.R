@@ -134,97 +134,97 @@ data_dict <- bind_rows(data_dict, add_to_dictionary(contracts, "Actuarial_Contra
 # Save cleaned data
 save_dataset(contracts, "contracts_clean")
 
-# ============================================================================
-# DATASET 2: Tank Construction/Closure Data
-# ============================================================================
+# # ============================================================================
+# # DATASET 2: Tank Construction/Closure Data
+# # ============================================================================
 
-cat("Loading Tank Construction Data...\n")
+# cat("Loading Tank Construction Data...\n")
 
-tanks_raw <- read_excel(
-  file.path(paths$raw, "Tank_Construction_Closed.xlsx"),
-  sheet = "data"
-) %>%
-  clean_names()
+# tanks_raw <- read_excel(
+#   file.path(paths$raw, "Tank_Construction_Closed.xlsx"),
+#   sheet = "data"
+# ) %>%
+#   clean_names()
 
-cat(paste("  Raw records:", nrow(tanks_raw), "\n"))
-cat(paste("  Columns:", ncol(tanks_raw), "\n"))
+# cat(paste("  Raw records:", nrow(tanks_raw), "\n"))
+# cat(paste("  Columns:", ncol(tanks_raw), "\n"))
 
-# Data cleaning
-tanks <- tanks_raw %>%
-  rename(
-    facility_id = pf_other_id,
-    facility_name = facility_name,
-    client_id = client_id,
-    client_name = client_search_name,
-    region = region_code,
-    tank_type = ast_ust,
-    tank_seq = seq_number,
-    capacity_gallons = capacity,
-    install_date = date_installed,
-    substance = substance_stored_desc,
-    component_code = sys_comp,
-    component_desc = sys_comp_desc,
-    construction_desc = comp_desc,
-    construction_comment = comp_desc_comment,
-    construction_detail = comp_desc_description,
-    permit_status = tank_permit_status_code,
-    tank_status = tank_status_code
-  ) %>%
-  mutate(
-    # Convert dates
-    install_date = as.Date(install_date),
+# # Data cleaning
+# tanks <- tanks_raw %>%
+#   rename(
+#     facility_id = pf_other_id,
+#     facility_name = facility_name,
+#     client_id = client_id,
+#     client_name = client_search_name,
+#     region = region_code,
+#     tank_type = ast_ust,
+#     tank_seq = seq_number,
+#     capacity_gallons = capacity,
+#     install_date = date_installed,
+#     substance = substance_stored_desc,
+#     component_code = sys_comp,
+#     component_desc = sys_comp_desc,
+#     construction_desc = comp_desc,
+#     construction_comment = comp_desc_comment,
+#     construction_detail = comp_desc_description,
+#     permit_status = tank_permit_status_code,
+#     tank_status = tank_status_code
+#   ) %>%
+#   mutate(
+#     # Convert dates
+#     install_date = as.Date(install_date),
     
-    # Calculate tank age (as of current date)
-    tank_age_years = as.numeric(difftime(Sys.Date(), install_date, units = "days")) / 365.25,
+#     # Calculate tank age (as of current date)
+#     tank_age_years = as.numeric(difftime(Sys.Date(), install_date, units = "days")) / 365.25,
     
-    # Installation year for cohort analysis
-    install_year = year(install_date),
+#     # Installation year for cohort analysis
+#     install_year = year(install_date),
     
-    # Create tank construction indicators
-    is_single_wall = str_detect(tolower(coalesce(construction_desc, "")), "single|bare|steel") &
-                     !str_detect(tolower(coalesce(construction_desc, "")), "double"),
-    is_double_wall = str_detect(tolower(coalesce(construction_desc, "")), "double|secondary"),
-    is_fiberglass = str_detect(tolower(coalesce(construction_desc, "")), "fiberglass|frp|composite"),
+#     # Create tank construction indicators
+#     is_single_wall = str_detect(tolower(coalesce(construction_desc, "")), "single|bare|steel") &
+#                      !str_detect(tolower(coalesce(construction_desc, "")), "double"),
+#     is_double_wall = str_detect(tolower(coalesce(construction_desc, "")), "double|secondary"),
+#     is_fiberglass = str_detect(tolower(coalesce(construction_desc, "")), "fiberglass|frp|composite"),
     
-    # Tank type categorization
-    wall_type = case_when(
-      is_double_wall ~ "Double-Wall",
-      is_single_wall ~ "Single-Wall",
-      TRUE ~ "Unknown/Other"
-    ),
+#     # Tank type categorization
+#     wall_type = case_when(
+#       is_double_wall ~ "Double-Wall",
+#       is_single_wall ~ "Single-Wall",
+#       TRUE ~ "Unknown/Other"
+#     ),
     
-    # Tank status interpretation
-    status_desc = case_when(
-      tank_status == "W" ~ "Withdrawn",
-      tank_status == "UR" ~ "Under Review",
-      tank_status == "A" ~ "Active",
-      tank_status == "C" ~ "Closed",
-      TRUE ~ as.character(tank_status)
-    ),
+#     # Tank status interpretation
+#     status_desc = case_when(
+#       tank_status == "W" ~ "Withdrawn",
+#       tank_status == "UR" ~ "Under Review",
+#       tank_status == "A" ~ "Active",
+#       tank_status == "C" ~ "Closed",
+#       TRUE ~ as.character(tank_status)
+#     ),
     
-    # Underground vs aboveground
-    is_underground = (tank_type == "UST")
-  ) %>%
-  filter(!is.na(facility_id) & facility_id != "")
+#     # Underground vs aboveground
+#     is_underground = (tank_type == "UST")
+#   ) %>%
+#   filter(!is.na(facility_id) & facility_id != "")
 
-cat(paste("  Cleaned records:", nrow(tanks), "\n"))
+# cat(paste("  Cleaned records:", nrow(tanks), "\n"))
 
-# Summary statistics
-cat("\n  Tank Summary:\n")
-cat(paste("    - Unique facilities:", n_distinct(tanks$facility_id), "\n"))
-cat(paste("    - Install date range:", min(tanks$install_date, na.rm = TRUE), "to",
-          max(tanks$install_date, na.rm = TRUE), "\n"))
-cat(paste("    - Mean tank age:", round(mean(tanks$tank_age_years, na.rm = TRUE), 1), "years\n"))
-cat(paste("    - Wall types:\n"))
-print(table(tanks$wall_type, useNA = "ifany"))
-cat(paste("    - Tank status:\n"))
-print(table(tanks$status_desc, useNA = "ifany"))
+# # Summary statistics
+# cat("\n  Tank Summary:\n")
+# cat(paste("    - Unique facilities:", n_distinct(tanks$facility_id), "\n"))
+# cat(paste("    - Install date range:", min(tanks$install_date, na.rm = TRUE), "to",
+#           max(tanks$install_date, na.rm = TRUE), "\n"))
+# cat(paste("    - Mean tank age:", round(mean(tanks$tank_age_years, na.rm = TRUE), 1), "years\n"))
+# cat(paste("    - Wall types:\n"))
+# print(table(tanks$wall_type, useNA = "ifany"))
+# cat(paste("    - Tank status:\n"))
+# print(table(tanks$status_desc, useNA = "ifany"))
 
-# Update data dictionary
-data_dict <- bind_rows(data_dict, add_to_dictionary(tanks, "Tank_Construction_Closed.xlsx"))
+# # Update data dictionary
+# data_dict <- bind_rows(data_dict, add_to_dictionary(tanks, "Tank_Construction_Closed.xlsx"))
 
-# Save cleaned data
-save_dataset(tanks, "tanks_clean")
+# # Save cleaned data
+# save_dataset(tanks, "tanks_clean")
 
 # ============================================================================
 # DATASET 3: Individual Claims Data

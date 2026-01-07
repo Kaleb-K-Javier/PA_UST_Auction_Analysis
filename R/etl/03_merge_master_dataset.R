@@ -2,10 +2,24 @@
 # ============================================================================
 # Pennsylvania UST Auction Analysis - ETL Step 3: Construct Master Dataset
 # ============================================================================
-# Purpose: Merge USTIF data sources into unified analysis panel
-# Input: Cleaned .rds files from Step 1
-# Output: Master analysis dataset
+# Purpose: Single consolidated script producing:
+#   1. Full claim-level dataset for descriptive analysis
+#   2. Facility characteristics (left-joined, NAs preserved)
+#   3. IV construction (adjuster leniency)
+#   4. analysis_sample flag for causal inference subset
+#
+# Output: data/processed/master_analysis_dataset.rds
 # ============================================================================
+# UNIT OF ANALYSIS: One row per claim_number
+# ============================================================================
+
+# Potential Error Sources:
+
+# department format may not match permit_number if formatting differs (e.g., leading zeros). 
+# Verify with head(claims$department) vs head(facility_linkage$permit_number).
+# The adjuster field comes from contracts; claims without contracts have adjuster = NA and
+#  thus has_valid_iv = FALSE. This is correct behavior but means non-auction claims are excluded from IV analysis by design.
+# Script 04 is now obsolete — delete or rename to 04_DEPRECATED.R to avoid confusion.
 
 cat("\n========================================\n")
 cat("ETL Step 3: Constructing Master Dataset\n")
@@ -19,136 +33,114 @@ library(lubridate)
 if (!exists("paths")) {
   paths <- list(
     processed = "data/processed",
-    external = "data/external"
+    external = "data/external",
+    padep = "data/external/padep"
   )
 }
 
 # ============================================================================
-# LOAD CLEANED DATASETS
+# SECTION 1: LOAD SOURCE DATA
 # ============================================================================
 
-cat("Loading cleaned datasets...\n")
+cat("Loading source datasets...\n")
 
-# Load USTIF data (required)
-contracts <- readRDS(file.path(paths$processed, "contracts_clean.rds"))
-tanks <- readRDS(file.path(paths$processed, "tanks_clean.rds"))
+# --- USTIF Data (Required) ---
 claims <- readRDS(file.path(paths$processed, "claims_clean.rds"))
+contracts <- readRDS(file.path(paths$processed, "contracts_clean.rds"))
 
-cat(paste("  • Contracts:", nrow(contracts), "records\n"))
-cat(paste("  • Tanks:", nrow(tanks), "records\n"))
-cat(paste("  • Claims:", nrow(claims), "records\n"))
+cat(sprintf("  • Claims: %d records\n", nrow(claims)))
+cat(sprintf("  • Contracts: %d records\n", nrow(contracts)))
 
-# Load PA DEP data (optional - may not exist)
-tanks_padep <- NULL
-cleanup_padep <- NULL
+n_claims_input <- nrow(claims)
+n_unique_claims_input <- n_distinct(claims$claim_number)
 
-padep_tanks_path <- file.path(paths$external, "padep_tanks_raw.rds")
-padep_cleanup_path <- file.path(paths$external, "padep_cleanup_raw.rds")
+# --- PA DEP Facility Data (Required for facility covariates) ---
+facility_linkage_path <- file.path(paths$padep, "facility_linkage_table.csv")
 
-if (file.exists(padep_tanks_path)) {
-  tanks_padep <- readRDS(padep_tanks_path)
-  cat(paste("  • PA DEP Tanks:", nrow(tanks_padep), "records (optional)\n"))
-}
-
-if (file.exists(padep_cleanup_path)) {
-  cleanup_padep <- readRDS(padep_cleanup_path)
-  cat(paste("  • PA DEP Cleanup:", nrow(cleanup_padep), "records (optional)\n"))
+if (!file.exists(facility_linkage_path)) {
+  warning(sprintf(
+    "Facility linkage table not found at: %s\n
+     Facility covariates will be unavailable. Run R/etl/02a_padep_download.R first.",
+    facility_linkage_path
+  ))
+  facility_linkage <- NULL
+} else {
+  facility_linkage <- read_csv(facility_linkage_path, show_col_types = FALSE)
+  cat(sprintf("  • Facility linkage: %d facilities\n", nrow(facility_linkage)))
 }
 
 cat("\n")
 
 # ============================================================================
-# STEP 1: Create Claims-Level Master Dataset
+# SECTION 2: JOIN CLAIMS ← CONTRACTS
 # ============================================================================
-# Primary unit of analysis: Individual claims
-# Enriched with contract/auction information and facility characteristics
+# Join type: LEFT JOIN (preserve all claims)
+# Cardinality: One claim may have multiple contracts (M:M)
+# Strategy: After join, aggregate to claim-level
 
-cat("Step 1: Building claims-level master dataset...\n")
+cat("Joining claims with contracts...\n")
 
-# Identify merge keys between datasets
-# Claims use: claim_number
-# Contracts use: claim_number
-# Tanks use: facility_id (need to link via claims if possible)
-
-# First, merge claims with contracts
-master_claims <- claims %>%
+master <- claims %>%
   left_join(
     contracts %>%
-      # Keep relevant contract fields
       select(
         claim_number,
         contract_id,
         auction_type,
         bid_type,
         contract_type,
-        contract_category,
         base_price,
         amendments_total,
         total_contract_value,
-        paid_to_date,
         contract_start,
         contract_end,
         brings_to_closure_flag,
-        consultant,
         adjuster,
         site_name
       ),
     by = "claim_number",
-    relationship = "many-to-many"  # One claim may have multiple contracts
+    relationship = "many-to-many"
   )
 
-cat(paste("  • Claims merged with contracts:", nrow(master_claims), "records\n"))
-
-# Check merge rate
-claims_with_contract <- master_claims %>%
-  filter(!is.na(contract_id)) %>%
-  distinct(claim_number) %>%
-  nrow()
-
-cat(paste("  • Claims with contract data:", claims_with_contract, "/", 
-          n_distinct(claims$claim_number), 
-          "(", round(claims_with_contract / n_distinct(claims$claim_number) * 100, 1), "%)\n"))
+# --- Cartesian Explosion Check ---
+expansion_ratio <- nrow(master) / n_claims_input
+if (expansion_ratio > 2.0) {
+  warning(sprintf("CARTESIAN EXPLOSION: %.1fx expansion. Review contracts for duplicates.", expansion_ratio))
+}
+cat(sprintf("  • Post-join rows: %d (%.2fx expansion)\n", nrow(master), expansion_ratio))
 
 # ============================================================================
-# STEP 2: Create Analysis Variables
+# SECTION 3: CREATE CLAIM-LEVEL VARIABLES (Pre-Aggregation)
 # ============================================================================
 
-cat("\nStep 2: Creating analysis variables...\n")
+cat("\nCreating claim-level variables...\n")
 
-master_claims <- master_claims %>%
+master <- master %>%
   mutate(
-    # ---- Cost Variables ----
-    # Total cost = max of incurred loss and total paid
-    total_cost = pmax(coalesce(incurred_loss, 0), coalesce(total_paid, 0), na.rm = TRUE),
-    
-    # Log transformation (add $1 to handle zeros)
+    # --- Cost Definition (Status-Dependent) ---
+    # Closed claims: actual expenditure (total_paid)
+    # Open claims: incurred loss (paid + reserves)
+    total_cost = case_when(
+      is_closed ~ coalesce(total_paid, 0),
+      !is_closed ~ coalesce(incurred_loss, total_paid, 0),
+      TRUE ~ coalesce(total_paid, 0)
+    ),
     log_total_cost = log(total_cost + 1),
     
-    # Cost categories
-    cost_category = cut(
-      total_cost,
-      breaks = c(0, 10000, 50000, 100000, 250000, 500000, Inf),
-      labels = c("$0-10K", "$10-50K", "$50-100K", "$100-250K", "$250-500K", "$500K+"),
-      include.lowest = TRUE
-    ),
-    
-    # ---- Auction/Contract Variables ----
-    # Has any contract (auction or otherwise)
+    # --- Contract/Auction Indicators ---
     has_contract = !is.na(contract_id),
-    
-    # Auction type indicators
     is_auction = has_contract & auction_type %in% c("Scope of Work", "Bid-to-Result"),
     is_sow = auction_type == "Scope of Work",
     is_bid_to_result = auction_type == "Bid-to-Result",
     
-    # Contract completion
-    contract_complete = !is.na(contract_end),
+    # --- Treatment Variable for Causal Inference ---
+    # PFP (Pay-for-Performance) = Bid-to-Result contracts
+    # Control = Everything else (T&M, no contract)
+    # NOTE: SOW excluded from analysis_sample (confounds incentive comparison)
+    is_PFP = (auction_type == "Bid-to-Result"),
     
-    # ---- Temporal Variables ----
-    # Fiscal year (July 1 - June 30)
+    # --- Temporal ---
     fiscal_year = ifelse(month(claim_date) >= 7, year(claim_date) + 1, year(claim_date)),
-    
-    # Era groupings for trend analysis
     era = case_when(
       claim_year < 2000 ~ "Pre-2000",
       claim_year >= 2000 & claim_year < 2005 ~ "2000-2004",
@@ -158,37 +150,29 @@ master_claims <- master_claims %>%
       TRUE ~ "Unknown"
     ),
     
-    # ---- Geographic Variables ----
-    # Clean county (already done, but ensure consistency)
-    county_clean = str_to_title(str_trim(county)),
-    
-    # DEP region factor
-    dep_region_factor = factor(dep_region)
+    # --- Geographic ---
+    county_clean = str_to_title(str_trim(county))
   )
 
-cat("  • Analysis variables created\n")
-
 # ============================================================================
-# STEP 3: Aggregate to Claim Level (One Row per Claim)
+# SECTION 4: AGGREGATE TO CLAIM LEVEL
 # ============================================================================
+# Output: Exactly one row per claim_number
 
-cat("\nStep 3: Aggregating to claim level...\n")
+cat("Aggregating to claim level...\n")
 
-# Since a claim can have multiple contracts, we need to decide how to aggregate
-# Strategy: Keep one row per claim, summarize contract info
-
-master_claims_agg <- master_claims %>%
+master_agg <- master %>%
   group_by(claim_number) %>%
   summarise(
-    # ---- Core Claim Info (first occurrence) ----
+    # --- Identifiers ---
     department = first(department),
     claimant_name = first(claimant_name),
+    
+    # --- Geography ---
     county = first(county_clean),
     dep_region = first(dep_region),
-    location_desc = first(location_desc),
-    products = first(products),
     
-    # ---- Dates ----
+    # --- Dates ---
     claim_date = first(claim_date),
     loss_reported_date = first(loss_reported_date),
     closed_date = first(closed_date),
@@ -196,192 +180,302 @@ master_claims_agg <- master_claims %>%
     fiscal_year = first(fiscal_year),
     era = first(era),
     
-    # ---- Claim Status ----
+    # --- Status ---
     claim_status = first(claim_status),
     is_closed = first(is_closed),
     is_open = first(is_open),
+    claim_duration_days = first(claim_duration_days),
     claim_duration_years = first(claim_duration_years),
     
-    # ---- Cost Variables ----
+    # --- Costs ---
     paid_loss = first(paid_loss),
     paid_alae = first(paid_alae),
     incurred_loss = first(incurred_loss),
     total_paid = first(total_paid),
     total_cost = first(total_cost),
     log_total_cost = first(log_total_cost),
-    cost_category = first(cost_category),
     
-    # ---- Contract/Auction Variables (aggregated) ----
+    # --- Contract Info (Aggregated) ---
     n_contracts = sum(!is.na(contract_id)),
     has_contract = any(!is.na(contract_id)),
     is_auction = any(is_auction, na.rm = TRUE),
     is_sow = any(is_sow, na.rm = TRUE),
     is_bid_to_result = any(is_bid_to_result, na.rm = TRUE),
+    is_PFP = any(is_PFP, na.rm = TRUE),  # Treatment indicator
     brings_to_closure = any(brings_to_closure_flag, na.rm = TRUE),
     
-    # Contract cost info (sum across contracts)
-    total_base_price = sum(base_price, na.rm = TRUE),
-    total_amendments = sum(amendments_total, na.rm = TRUE),
+    # --- Contract Costs ---
     total_contract_value = sum(total_contract_value, na.rm = TRUE),
-    
-    # First contract date
     first_contract_date = min(contract_start, na.rm = TRUE),
     
-    # Site name (from contract if available)
-    site_name = first(na.omit(site_name)),
+    # --- Adjuster (for IV) ---
+    # If multiple contracts, take first non-NA adjuster
+    adjuster = first(na.omit(adjuster)),
     
     .groups = "drop"
   ) %>%
-  # Clean up Inf values from min/sum on empty sets
   mutate(
+    # Clean Inf values
     first_contract_date = if_else(is.infinite(first_contract_date), NA_Date_, first_contract_date),
-    total_base_price = if_else(total_base_price == 0 & !has_contract, NA_real_, total_base_price),
-    total_contract_value = if_else(total_contract_value == 0 & !has_contract, NA_real_, total_contract_value)
+    total_contract_value = if_else(total_contract_value == 0 & !has_contract, NA_real_, total_contract_value),
+    # Ensure is_PFP is FALSE (not NA) for claims without contracts
+    is_PFP = coalesce(is_PFP, FALSE)
   )
 
-cat(paste("  • Aggregated to:", nrow(master_claims_agg), "unique claims\n"))
+# --- Validation: 1:1 mapping ---
+stopifnot(nrow(master_agg) == n_distinct(master_agg$claim_number))
+cat(sprintf("  • Aggregated to %d unique claims ✓\n", nrow(master_agg)))
 
 # ============================================================================
-# STEP 4: Link Facility/Tank Information
+# SECTION 5: LEFT JOIN FACILITY CHARACTERISTICS
 # ============================================================================
+# Join: claims.department = facility_linkage.permit_number
+# Type: LEFT JOIN (preserve all claims; NAs for unmatched facilities)
 
-cat("\nStep 4: Linking facility information...\n")
+cat("\nJoining facility characteristics...\n")
 
-# The tank data uses PF_OTHER_ID (facility_id), claims use claim_number
-# We may not have a direct link - explore potential linkage via site_name or claimant_name
-
-# For now, create facility-level summary from tanks data
-facility_summary <- tanks %>%
-  group_by(facility_id) %>%
-  summarise(
-    facility_name = first(facility_name),
-    client_name = first(client_name),
-    region = first(region),
-    n_tanks = n(),
-    total_capacity = sum(capacity_gallons, na.rm = TRUE),
-    min_install_year = min(install_year, na.rm = TRUE),
-    max_install_year = max(install_year, na.rm = TRUE),
-    mean_tank_age = mean(tank_age_years, na.rm = TRUE),
-    pct_single_wall = mean(is_single_wall, na.rm = TRUE),
-    pct_double_wall = mean(is_double_wall, na.rm = TRUE),
-    pct_fiberglass = mean(is_fiberglass, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-cat(paste("  • Facility summary:", nrow(facility_summary), "unique facilities\n"))
-
-# Note: Direct facility-claim linkage requires identifier matching
-# This would typically be done via facility_id in claims or fuzzy name matching
-# For now, we'll flag this as a data limitation
-
-cat("  NOTE: Direct facility-claim linkage not available in current data structure.\n")
-cat("        Analysis will proceed at claim level without tank-level attributes.\n")
+if (!is.null(facility_linkage)) {
+  
+  # Select relevant facility columns
+  facility_covariates <- facility_linkage %>%
+    select(
+      permit_number,
+      efacts_facility_id,
+      site_id,
+      facility_name,
+      latitude,
+      longitude,
+      owner_id,
+      owner_name,
+      registration_status
+    ) %>%
+    # Deduplicate if needed (take first occurrence per permit)
+    distinct(permit_number, .keep_all = TRUE)
+  
+  # Join
+  master_agg <- master_agg %>%
+    left_join(
+      facility_covariates,
+      by = c("department" = "permit_number")
+    )
+  
+  # --- Match Rate Diagnostic ---
+  n_matched <- sum(!is.na(master_agg$efacts_facility_id))
+  match_rate <- n_matched / nrow(master_agg) * 100
+  
+  cat(sprintf("  • Facility match rate: %d / %d (%.1f%%)\n", 
+              n_matched, nrow(master_agg), match_rate))
+  
+  if (match_rate < 50) {
+    warning(sprintf("LOW FACILITY MATCH RATE: %.1f%%. Check department format.", match_rate))
+  }
+  
+  # --- Create Missing Facility Flag ---
+  master_agg <- master_agg %>%
+    mutate(facility_data_missing = is.na(efacts_facility_id))
+  
+} else {
+  # No facility data available
+  master_agg <- master_agg %>%
+    mutate(
+      efacts_facility_id = NA_integer_,
+      site_id = NA_integer_,
+      facility_name = NA_character_,
+      latitude = NA_real_,
+      longitude = NA_real_,
+      owner_id = NA_integer_,
+      owner_name = NA_character_,
+      registration_status = NA_character_,
+      facility_data_missing = TRUE
+    )
+  cat("  • Facility data unavailable; columns added as NA\n")
+}
 
 # ============================================================================
-# STEP 5: Create Final Analysis Dataset
+# SECTION 6: CONSTRUCT INSTRUMENTAL VARIABLE (Adjuster Leniency)
 # ============================================================================
+# Instrument: Leave-one-out mean of adjuster's PFP assignment rate
+# Validity requires: adjuster has >10 claims (stable estimate)
 
-cat("\nStep 5: Finalizing analysis dataset...\n")
+cat("\nConstructing adjuster leniency instrument...\n")
 
-# Final cleaning and validation
-analysis_dataset <- master_claims_agg %>%
-  # Remove claims with zero or missing cost (if any)
-  filter(total_cost > 0) %>%
-  # Ensure valid dates
-  filter(!is.na(claim_date)) %>%
-  # Create additional analysis flags
+# --- Step 1: Count claims per adjuster ---
+adjuster_counts <- master_agg %>%
+  filter(!is.na(adjuster)) %>%
+  count(adjuster, name = "adjuster_n_claims")
+
+# --- Step 2: Identify valid adjusters (>10 claims) ---
+valid_adjusters <- adjuster_counts %>%
+  filter(adjuster_n_claims > 10) %>%
+  pull(adjuster)
+
+cat(sprintf("  • Total adjusters: %d\n", n_distinct(master_agg$adjuster, na.rm = TRUE)))
+cat(sprintf("  • Valid adjusters (>10 claims): %d\n", length(valid_adjusters)))
+
+# --- Step 3: Calculate Leave-One-Out Leniency ---
+# For each observation, calculate adjuster's PFP rate EXCLUDING that observation
+master_agg <- master_agg %>%
+  left_join(adjuster_counts, by = "adjuster") %>%
+  group_by(adjuster) %>%
   mutate(
-    # Valid for cost analysis
-    valid_for_cost_analysis = total_cost > 0 & !is.na(total_cost),
+    # Total PFP assignments by this adjuster
+    adjuster_pfp_total = sum(is_PFP, na.rm = TRUE),
+    # Leave-one-out: exclude current observation
+    adjuster_pfp_loo = adjuster_pfp_total - as.numeric(is_PFP),
+    # LOO mean (adjuster's leniency excluding this case)
+    adjuster_leniency = if_else(
+      adjuster_n_claims > 1,
+      adjuster_pfp_loo / (adjuster_n_claims - 1),
+      NA_real_
+    )
+  ) %>%
+  ungroup() %>%
+  # Clean up intermediate columns
+  select(-adjuster_pfp_total, -adjuster_pfp_loo) %>%
+  # Flag valid IV observations
+  mutate(
+    has_valid_iv = !is.na(adjuster) & adjuster %in% valid_adjusters & !is.na(adjuster_leniency)
+  )
+
+n_valid_iv <- sum(master_agg$has_valid_iv)
+cat(sprintf("  • Observations with valid IV: %d (%.1f%%)\n", 
+            n_valid_iv, 100 * n_valid_iv / nrow(master_agg)))
+
+# ============================================================================
+# SECTION 7: CREATE ANALYSIS SAMPLE FLAG
+# ============================================================================
+# analysis_sample = 1 for observations valid for causal inference
+# Criteria:
+#   1. Closed claims only (open claims have censored costs)
+#   2. total_paid > $1,000 (exclude administrative noise)
+#   3. NOT Scope of Work (SOW confounds PFP vs T&M comparison)
+#   4. Has valid IV (adjuster with >10 claims)
+
+cat("\nCreating analysis sample flag...\n")
+
+master_agg <- master_agg %>%
+  mutate(
+    analysis_sample = as.integer(
+      is_closed == TRUE &
+      total_paid > 1000 &
+      !is_sow &
+      has_valid_iv
+    )
+  )
+
+n_analysis <- sum(master_agg$analysis_sample, na.rm = TRUE)
+cat(sprintf("  • Analysis sample: %d / %d claims (%.1f%%)\n",
+            n_analysis, nrow(master_agg), 100 * n_analysis / nrow(master_agg)))
+
+# Breakdown of exclusions
+cat("\n  Exclusion breakdown:\n")
+cat(sprintf("    - Open claims: %d\n", sum(!master_agg$is_closed, na.rm = TRUE)))
+cat(sprintf("    - total_paid ≤ $1,000: %d\n", sum(master_agg$total_paid <= 1000, na.rm = TRUE)))
+cat(sprintf("    - Scope of Work: %d\n", sum(master_agg$is_sow, na.rm = TRUE)))
+cat(sprintf("    - Invalid IV (adjuster <10 claims): %d\n", sum(!master_agg$has_valid_iv)))
+
+# ============================================================================
+# SECTION 8: CREATE FINAL DERIVED VARIABLES
+# ============================================================================
+
+cat("\nCreating final derived variables...\n")
+
+master_agg <- master_agg %>%
+  mutate(
+    # --- Cost Categories ---
+    cost_category = cut(
+      total_cost,
+      breaks = c(0, 10000, 50000, 100000, 250000, 500000, Inf),
+      labels = c("$0-10K", "$10-50K", "$50-100K", "$100-250K", "$250-500K", "$500K+"),
+      include.lowest = TRUE
+    ),
     
-    # Valid for auction analysis
-    valid_for_auction_analysis = has_contract,
-    
-    # Auction type factor for modeling
+    # --- Auction Type Factor (for descriptive analysis) ---
     auction_type_factor = case_when(
       is_bid_to_result ~ "Bid-to-Result",
       is_sow ~ "Scope of Work",
       has_contract ~ "Other Contract",
       TRUE ~ "No Contract"
-    ) %>% factor(levels = c("No Contract", "Scope of Work", "Bid-to-Result", "Other Contract"))
+    ) %>% factor(levels = c("No Contract", "Scope of Work", "Bid-to-Result", "Other Contract")),
+    
+    # --- Time to Intervention (for policy analysis) ---
+    # Years from claim filing to first contract
+    time_to_intervention_years = as.numeric(
+      difftime(first_contract_date, claim_date, units = "days")
+    ) / 365.25,
+    
+    # --- Region Factor ---
+    region_factor = factor(dep_region),
+    
+    # --- Year Factor (for FE) ---
+    claim_year_factor = factor(claim_year)
   )
 
-cat(paste("  • Final analysis dataset:", nrow(analysis_dataset), "claims\n"))
-
 # ============================================================================
-# STEP 6: Generate Merge Diagnostics
+# SECTION 9: FINAL VALIDATION
 # ============================================================================
 
-cat("\nStep 6: Generating merge diagnostics...\n")
+cat("\nRunning final validation...\n")
 
-merge_diagnostics <- tibble(
-  dataset = c("Claims", "Contracts", "Tanks"),
-  source_records = c(
-    nrow(claims),
-    nrow(contracts),
-    nrow(tanks)
-  ),
-  unique_key = c(
-    n_distinct(claims$claim_number),
-    n_distinct(contracts$claim_number),
-    n_distinct(tanks$facility_id)
-  ),
-  merged_records = c(
-    nrow(analysis_dataset),
-    sum(analysis_dataset$has_contract),
-    NA  # Tank linkage not implemented
-  ),
-  match_rate = c(
-    100,
-    round(sum(analysis_dataset$has_contract) / nrow(analysis_dataset) * 100, 1),
-    NA
-  )
-)
+# Check 1: One row per claim
+stopifnot(nrow(master_agg) == n_distinct(master_agg$claim_number))
 
-print(merge_diagnostics)
+# Check 2: No negative costs
+stopifnot(all(master_agg$total_cost >= 0, na.rm = TRUE))
+
+# Check 3: analysis_sample is 0/1
+stopifnot(all(master_agg$analysis_sample %in% c(0, 1, NA)))
+
+# Check 4: IV only defined for valid adjusters
+stopifnot(all(is.na(master_agg$adjuster_leniency[!master_agg$has_valid_iv]) | 
+              master_agg$adjuster_leniency[!master_agg$has_valid_iv] == 0, na.rm = TRUE))
+
+cat("  ✓ All validation checks passed\n")
 
 # ============================================================================
-# STEP 7: Save Outputs
+# SECTION 10: SAVE OUTPUT
 # ============================================================================
 
-cat("\nStep 7: Saving datasets...\n")
+cat("\nSaving master dataset...\n")
 
-# Save main analysis dataset
-saveRDS(analysis_dataset, file.path(paths$processed, "master_analysis_dataset.rds"))
-write_csv(analysis_dataset, file.path(paths$processed, "master_analysis_dataset.csv"))
-
-# Save facility summary (for potential future use)
-saveRDS(facility_summary, file.path(paths$processed, "facility_summary.rds"))
-
-# Save merge diagnostics
-saveRDS(merge_diagnostics, file.path(paths$processed, "merge_diagnostics.rds"))
+saveRDS(master_agg, file.path(paths$processed, "master_analysis_dataset.rds"))
+write_csv(master_agg, file.path(paths$processed, "master_analysis_dataset.csv"))
 
 cat("✓ Saved: data/processed/master_analysis_dataset.rds\n")
 cat("✓ Saved: data/processed/master_analysis_dataset.csv\n")
-cat("✓ Saved: data/processed/facility_summary.rds\n")
-cat("✓ Saved: data/processed/merge_diagnostics.rds\n")
 
 # ============================================================================
 # SUMMARY
 # ============================================================================
 
-cat("\n========================================\n")
-cat("ETL STEP 3 COMPLETE\n")
-cat("========================================\n")
-cat("\nMaster Analysis Dataset Summary:\n")
-cat(paste("  • Total claims:", nrow(analysis_dataset), "\n"))
-cat(paste("  • Claims with contracts:", sum(analysis_dataset$has_contract), 
-          "(", round(mean(analysis_dataset$has_contract) * 100, 1), "%)\n"))
-cat(paste("  • Auction claims:", sum(analysis_dataset$is_auction), 
-          "(", round(mean(analysis_dataset$is_auction) * 100, 1), "%)\n"))
-cat(paste("  • Date range:", min(analysis_dataset$claim_date), "to", 
-          max(analysis_dataset$claim_date), "\n"))
-cat(paste("  • Total paid (all claims): $", 
-          format(sum(analysis_dataset$total_cost, na.rm = TRUE), big.mark = ","), "\n"))
-cat(paste("  • Median cost per claim: $", 
-          format(median(analysis_dataset$total_cost, na.rm = TRUE), big.mark = ","), "\n"))
 cat("\n")
-cat("NEXT STEPS:\n")
-cat("  • Run: source('R/validation/01_data_quality_checks.R')\n")
-cat("  • Run: source('R/analysis/01_descriptive_stats.R')\n")
-cat("========================================\n\n")
+cat("════════════════════════════════════════════════════════════════════════\n")
+cat("                     MASTER DATASET COMPLETE                            \n")
+cat("════════════════════════════════════════════════════════════════════════\n")
+cat("\n")
+cat("DATASET STRUCTURE:\n")
+cat(sprintf("  • Total observations: %d claims\n", nrow(master_agg)))
+cat(sprintf("  • Unit of analysis: claim_number (1 row per claim)\n"))
+cat("\n")
+cat("SAMPLE DEFINITIONS:\n")
+cat(sprintf("  • Full sample (descriptive): %d claims\n", nrow(master_agg)))
+cat(sprintf("  • Analysis sample (causal):  %d claims (filter: analysis_sample == 1)\n", n_analysis))
+cat("\n")
+cat("KEY VARIABLES:\n")
+cat("  • Outcome:    total_cost, log_total_cost\n")
+cat("  • Treatment:  is_PFP (1 = Bid-to-Result auction)\n")
+cat("  • Instrument: adjuster_leniency (leave-one-out mean)\n")
+cat("  • Sample:     analysis_sample (1 = valid for causal inference)\n")
+cat("\n")
+cat("FACILITY LINKAGE:\n")
+cat(sprintf("  • Match rate: %.1f%%\n", 100 * sum(!master_agg$facility_data_missing) / nrow(master_agg)))
+cat("  • Missing flag: facility_data_missing\n")
+cat("\n")
+cat("USAGE:\n")
+cat("  # Descriptive analysis (full sample)\n")
+cat("  master <- readRDS('data/processed/master_analysis_dataset.rds')\n")
+cat("\n")
+cat("  # Causal inference (restricted sample)\n")
+cat("  analysis <- master %>% filter(analysis_sample == 1)\n")
+cat("\n")
+cat("════════════════════════════════════════════════════════════════════════\n\n")
