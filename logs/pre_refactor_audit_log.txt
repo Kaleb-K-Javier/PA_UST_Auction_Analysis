@@ -1,0 +1,46 @@
+================================================================
+PRE-REFACTOR AUDIT REPORT
+Run Date: 2026-01-08 14:09:18.598665
+================================================================
+
+--- Loading Datasets ---
+✓ Loaded Tanks (New DB): 100553 rows. Columns cleaned (e.g., FAC_ID -> fac_id)
+✓ Loaded Claims: 7793 rows
+✓ Loaded Facility Linkage: 12025 rows
+
+--- Test 1: Tank Database Primary Key (FAC_ID + TANK_ID) ---
+FAIL: Found 566 duplicate keys. Example:
+Key: <fac_id, tank_id>
+     fac_id tank_id     N
+     <char>   <int> <int>
+1: 02-02481       1     2
+2: 02-02481       2     2
+3: 02-12108      24     2
+4: 02-12108      51     2
+5: 02-12108      52     2
+6: 02-12108      53     2
+
+--- Test 2: Claims 'department' ID Format ---
+WARNING: 3 claims (0.04%) do NOT match 'XX-XXXXX' format.
+Examples of invalid formats:
+[1] "09-E0004" "45-E0002" "51-E0000"
+
+--- Test 3: Join Integrity (Claims -> New Tank DB) ---
+Unique Claim IDs: 5835
+Unique Tank  IDs: 31335
+Matches Found:    5473 (93.80% coverage)
+Example Claim IDs missing from Tank DB:
+[1] "01-63226" "02-02404" "02-04004" "02-05278" "02-09187"
+
+--- Test 4: Linkage & GIS Data ---
+PASS: Linkage table contains Permit Number and County columns.
+Claims with matching Facility Linkage (for GIS/County): 46.44%
+
+--- Test 5: Sentinel Value Check (9999-01-01) ---
+Rows with '9999-01-01' closure date: 21043
+Rows with NA closure date:           0
+NOTE: New data uses 9999-01-01 exclusively for active tanks (no NAs).
+      Refactor MUST convert 9999-01-01 to NA for logic to work.
+
+================================================================
+END OF AUDIT
