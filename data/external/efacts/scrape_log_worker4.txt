@@ -1,0 +1,34 @@
+[2026-01-05 16:25:50] INFO: STARTING FRESH SCRAPE
+[2026-01-05 16:25:50] INFO: Scraping 9638 facilities (100.0% remaining)
+[2026-01-05 16:45:03] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 17:02:00] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 17:21:41] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 17:49:35] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 18:08:59] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 18:37:06] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 18:57:46] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 19:15:15] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 19:28:32] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 19:44:53] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 20:11:02] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 20:34:35] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 20:49:41] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 21:06:28] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 21:26:39] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 21:58:32] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 22:30:17] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 23:16:19] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-05 23:51:35] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-06 00:27:04] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-06 01:00:13] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-06 01:44:21] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-06 02:29:24] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-06 03:16:32] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-06 04:04:35] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-06 04:45:11] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-06 05:21:50] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-06 05:53:26] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-06 06:35:56] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-06 07:17:37] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-06 07:57:24] INFO: Checkpoint: Saving batch of 100 facilities
+[2026-01-06 08:30:16] INFO: Checkpoint: Saving batch of 100 facilities

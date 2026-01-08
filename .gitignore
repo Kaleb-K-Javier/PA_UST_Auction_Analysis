@@ -1,0 +1,8 @@
+# Ignore Data Files
+*.csv
+*.rds
+*.RData
+*.xlsx
+
+# Ignore R History
+.Rhistory

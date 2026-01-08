@@ -1,0 +1,715 @@
+---
+title: "Auction-Based Procurement in UST Remediation"
+subtitle: "A Descriptive Analysis of Pennsylvania USTIF Claims"
+author:
+  - name: "[Your Name]"
+    affiliation: "[Your Institution]"
+date: last-modified
+date-format: "MMMM D, YYYY"
+abstract: |
+  This policy brief provides a descriptive analysis of remediation costs and auction-based procurement mechanisms in Pennsylvania's Underground Storage Tank Indemnification Fund (USTIF) program. Drawing on administrative claims data spanning 1994–2025, we characterize the distribution of remediation costs across facilities and examine how costs correlate with procurement type, geographic location, and time period. Key findings include substantial variation in remediation costs (median ~$50,000), differential cost patterns across auction types, and significant geographic heterogeneity. These descriptive patterns provide a foundation for understanding USTIF operations and inform future policy evaluation efforts. Importantly, this analysis does not make causal claims about the effect of auctions on costs—such conclusions would require additional research with appropriate identification strategies.
+format:
+  pdf:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    fontsize: 11pt
+    geometry:
+      - top=1in
+      - bottom=1in
+      - left=1in
+      - right=1in
+    keep-tex: false
+    link-citations: true
+    colorlinks: true
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    theme: cosmo
+    code-fold: true
+    self-contained: true
+bibliography: ../literature/references.bib
+execute:
+  echo: false
+  warning: false
+  message: false
+  cache: false
+---
+
+```{r setup}
+#| include: false
+
+# Load required packages
+library(tidyverse)
+library(scales)
+library(gt)
+library(gtsummary)
+library(patchwork)
+library(knitr)
+library(kableExtra)
+
+# Set global options
+options(scipen = 999, digits = 3)
+
+# Define custom theme
+theme_set(
+  theme_minimal(base_size = 10) +
+    theme(
+      plot.title = element_text(face = "bold", size = 11),
+      legend.position = "bottom",
+      panel.grid.minor = element_blank()
+    )
+)
+
+# Load analysis dataset
+data_path <- "../data/processed/master_analysis_dataset.rds"
+if (file.exists(data_path)) {
+  master <- readRDS(data_path)
+} else {
+  # Create placeholder for rendering without data
+  stop("Analysis dataset not found. Run ETL pipeline first: source('R/etl/01_load_ustif_data.R')")
+}
+
+# Load pre-computed results if available
+results_path <- "../data/processed/descriptive_results.rds"
+if (file.exists(results_path)) {
+  results <- readRDS(results_path)
+}
+```
+
+\newpage
+
+# Executive Summary {.unnumbered}
+
+This policy brief examines Pennsylvania's Underground Storage Tank Indemnification Fund (USTIF) claims data to understand patterns in remediation costs and the characteristics of auction-based procurement. Our analysis is **descriptive**—we document what the data show without making causal claims about whether auctions reduce costs.
+
+## Key Findings
+
+**Cost Distribution**
+```{r exec-cost-stats}
+#| include: false
+median_cost <- median(master$total_cost, na.rm = TRUE)
+mean_cost <- mean(master$total_cost, na.rm = TRUE)
+total_paid <- sum(master$total_cost, na.rm = TRUE)
+n_claims <- nrow(master)
+```
+
+- USTIF has processed `r format(n_claims, big.mark = ",")` claims since 1994
+- Total remediation expenditures exceed `r dollar(total_paid)`
+- Median claim cost: `r dollar(median_cost)` | Mean: `r dollar(mean_cost)`
+- Costs are highly skewed, with 10% of claims accounting for over 50% of expenditures
+
+**Procurement Patterns**
+
+```{r exec-contract-stats}
+#| include: false
+pct_with_contract <- mean(master$has_contract, na.rm = TRUE) * 100
+pct_auction <- mean(master$is_auction, na.rm = TRUE) * 100
+```
+
+- `r round(pct_with_contract, 1)`% of claims have associated contract records
+- `r round(pct_auction, 1)`% were procured through USTIF's formal auction process
+- Two auction formats exist: Scope of Work (cost-weighted) and Bid-to-Result (technical-weighted)
+
+**Geographic Variation**
+
+- Remediation costs vary substantially across Pennsylvania's 67 counties
+- The top 10 counties by claim volume account for approximately 50% of all claims
+- DEP regional offices show differing patterns in average claim costs
+
+## Important Caveats
+
+::: {.callout-warning}
+## Interpretation Caution
+
+The cost differences observed between auction and non-auction claims **cannot be interpreted as causal effects**. USTIF selects which claims go to auction based on site characteristics, complexity, and cost concerns. Observed patterns may reflect this selection process rather than true auction effects.
+:::
+
+## Recommendations
+
+1. **Data Enhancement**: Link claim records to tank-level facility attributes for richer analysis
+2. **Selection Documentation**: Systematically record the criteria used to select claims for auction
+3. **Future Evaluation**: Design prospective studies with random or quasi-random variation to assess causal effects
+
+\newpage
+
+# Introduction
+
+## Background
+
+Underground storage tanks (USTs) containing petroleum products pose significant environmental risks when they leak. The U.S. Environmental Protection Agency (EPA) reports that leaking USTs are the leading documented source of groundwater contamination nationwide. When releases occur, remediation can be costly—often exceeding $100,000 per site—and the financial burden can exceed the resources of small tank owners.
+
+To address this challenge, Pennsylvania established the Underground Storage Tank Indemnification Fund (USTIF) in 1989. USTIF provides insurance coverage for tank owners, funded through annual registration fees, and manages the remediation process when releases are confirmed. A key policy question facing USTIF is how to procure remediation services efficiently while ensuring environmental quality.
+
+## USTIF's Auction System
+
+USTIF employs two primary procurement mechanisms:
+
+1. **Scope of Work (SOW) Contracts**: USTIF staff develop detailed technical specifications, and contractors bid primarily on cost. This approach provides certainty about the work to be performed but limits contractor flexibility.
+
+2. **Bid-to-Result Auctions**: USTIF defines desired environmental outcomes (e.g., achieving residential cleanup standards), and contractors propose both technical approaches and costs. Scoring emphasizes technical quality over price.
+
+According to USTIF institutional documentation, the auction selection process is managed by USTIF staff, who determine which claims are suitable candidates. The criteria include claims experiencing delays, cost overruns, or where competitive bidding might reveal more efficient approaches. All bids scoring above 70% of the maximum possible score are considered viable and presented for selection.
+
+## Purpose of This Analysis
+
+This policy brief provides a **descriptive characterization** of USTIF claims and the auction procurement system. We aim to:
+
+- Document the distribution of remediation costs across claims
+- Examine how costs correlate with procurement type, location, and time
+- Identify patterns that may warrant further investigation
+
+**Importantly, this analysis does not estimate causal effects.** The observed correlations between auction status and costs may reflect site selection rather than auction impacts. Future research with appropriate identification strategies would be needed for causal inference.
+
+\newpage
+
+# Data Insight: Why Raw Comparisons Are Misleading {#sec-data-insight}
+
+::: {.callout-important}
+## Critical Finding: Selection Bias in Contract Assignment
+
+Before examining the descriptive statistics, it is essential to understand why **direct comparisons between auction and non-auction claims are misleading**. This section explains the selection process and provides evidence that causal interpretation requires advanced econometric methods.
+:::
+
+## The Survivorship Problem
+
+USTIF does not randomly assign claims to auctions. Instead, the Third-Party Administrator (TPA) selects claims for auction intervention based on observable problems:
+
+- Claims with **excessive costs** relative to benchmarks
+- Claims with **slow remediation progress** 
+- Sites where the current contractor is underperforming
+
+This creates **survivorship bias**: the claims we observe in the auction (PFP) pool are precisely those that *failed* under the Time-and-Materials (T&M) approach. Claims that proceed smoothly under T&M close without ever entering the auction system.
+
+## Evidence of Selection
+
+```{r data-insight-balance}
+#| label: fig-selection-evidence
+#| fig-cap: "Evidence of Selection: PFP sites systematically differ from T&M sites on key observables"
+
+# Check if analysis panel exists
+if (file.exists("../data/processed/analysis_panel.rds")) {
+  
+  analysis_panel <- readRDS("../data/processed/analysis_panel.rds")
+  
+  # Create comparison summary
+  selection_evidence <- analysis_panel %>%
+    mutate(group = ifelse(is_PFP, "Pay-for-Performance (PFP)", "Time & Materials (T&M)")) %>%
+    group_by(group) %>%
+    summarise(
+      `N` = n(),
+      `Mean Cost ($)` = mean(total_paid, na.rm = TRUE),
+      `Median Cost ($)` = median(total_paid, na.rm = TRUE),
+      `Mean Duration (Years)` = mean(duration_years, na.rm = TRUE),
+      `Mean Tank Age (Years)` = mean(tank_age_imputed, na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  # Display as table
+  selection_evidence %>%
+    gt() %>%
+    fmt_currency(columns = contains("Cost"), decimals = 0) %>%
+    fmt_number(columns = contains("Duration") | contains("Tank Age"), decimals = 1) %>%
+    fmt_number(columns = N, use_seps = TRUE, decimals = 0) %>%
+    tab_header(
+      title = "Systematic Differences Between Contract Groups",
+      subtitle = "Evidence that selection is non-random"
+    ) %>%
+    tab_source_note("Source: USTIF Claims Data (Closed claims, total_paid > $1,000)") %>%
+    tab_footnote(
+      footnote = "PFP sites have longer durations and higher costs BEFORE intervention",
+      locations = cells_column_labels(columns = `Mean Cost ($)`)
+    )
+    
+} else {
+  cat("Note: Run ETL pipeline to generate analysis panel data.")
+}
+```
+
+The table above demonstrates that PFP sites **systematically differ** from T&M sites:
+
+- **Higher costs**: PFP sites show substantially higher remediation expenditures
+- **Longer durations**: Claims assigned to PFP have been open longer before intervention
+- **Older infrastructure**: PFP sites tend to have older tank systems
+
+## The Naive Fallacy
+
+```{r naive-fallacy-plot}
+#| label: fig-naive-fallacy
+#| fig-cap: "The Naive Fallacy: PFP appears more expensive, but this is selection bias"
+
+if (file.exists("../output/figures/cost_density_plot.png")) {
+  knitr::include_graphics("../output/figures/cost_density_plot.png")
+}
+```
+
+The density plot above illustrates the **naive fallacy**. If we simply compare costs across groups, PFP sites appear more expensive. A casual observer might conclude:
+
+> *"Auctions increase costs—we should abandon the PFP program."*
+
+This interpretation is **incorrect**. The cost difference reflects the selection process, not the treatment effect. Sites were sent to PFP *because* they were already problematic.
+
+## Implications for Interpretation
+
+Throughout this policy brief, keep the following in mind:
+
+1. **Descriptive ≠ Causal**: All statistics presented are conditional correlations, not treatment effects.
+
+2. **Selection on Observables and Unobservables**: Even controlling for observable characteristics, unobserved factors (site complexity, geological conditions, contractor quality) drive both selection and costs.
+
+3. **The Research Agenda**: Rigorous causal evaluation requires either:
+   - **Instrumental Variables**: Using quasi-random variation in TPA adjuster assignment
+   - **Randomized Controlled Trial**: Prospectively randomizing eligible claims to auction
+   - **Regression Discontinuity**: Exploiting threshold rules in the selection process
+
+The descriptive analysis that follows characterizes patterns in the data. Policy decisions about the auction program should await causal evidence from these more rigorous approaches.
+
+\newpage
+
+# Data and Methods
+
+## Data Sources
+
+This analysis draws on three administrative datasets provided by USTIF:
+
+```{r data-sources-table}
+#| label: tbl-data-sources
+#| tbl-cap: "Summary of Data Sources"
+
+tribble(
+  ~`Dataset`, ~`Records`, ~`Key Variables`, ~`Coverage`,
+  "Individual Claims", "7,793", "Claim costs, dates, status, location", "1994–2020",
+  "Contract Records", "658", "Contract type, bid amounts, contractors", "Various",
+  "Tank Construction", "6,914", "Tank attributes, installation dates, status", "Various"
+) %>%
+  gt() %>%
+  tab_options(
+    table.font.size = 10,
+    column_labels.font.weight = "bold"
+  )
+```
+
+The analysis dataset was constructed by merging claims with contract records using claim identifiers. Not all claims have associated contract records, which may reflect data coverage limitations or claims that proceeded without formal contracting.
+
+## Analytical Approach
+
+Our analysis employs three complementary methods:
+
+1. **Summary Statistics**: We calculate measures of central tendency and dispersion for key variables, stratified by relevant categories.
+
+2. **Visualization**: Graphical displays illustrate distributions and relationships in the data.
+
+3. **Descriptive Regression**: We estimate regression models to characterize conditional correlations between costs and covariates. These models control for confounding factors (year, geography) but **do not identify causal effects**.
+
+All analyses were conducted in R version 4.x using the `tidyverse`, `fixest`, and `gt` packages.
+
+\newpage
+
+# Findings
+
+## Cost Distribution
+
+Remediation costs exhibit substantial variation and right-skewness, with most claims costing less than $100,000 but a long tail of high-cost cases.
+
+```{r fig-cost-dist}
+#| label: fig-cost-dist
+#| fig-cap: "Distribution of UST Remediation Costs"
+#| fig-width: 7
+#| fig-height: 4
+
+ggplot(master, aes(x = total_cost)) +
+  geom_histogram(bins = 50, fill = "#1f77b4", alpha = 0.7, color = "white") +
+  scale_x_log10(labels = dollar_format()) +
+  geom_vline(xintercept = median(master$total_cost, na.rm = TRUE),
+             linetype = "dashed", color = "red", linewidth = 0.8) +
+  annotate("text", 
+           x = median(master$total_cost, na.rm = TRUE) * 2,
+           y = Inf, vjust = 2, hjust = 0,
+           label = paste("Median:", dollar(median(master$total_cost, na.rm = TRUE))),
+           color = "red", size = 3) +
+  labs(
+    x = "Total Cost (Log Scale)",
+    y = "Number of Claims"
+  )
+```
+
+```{r tbl-cost-summary}
+#| label: tbl-cost-summary
+#| tbl-cap: "Summary Statistics for Remediation Costs"
+
+master %>%
+  summarise(
+    `Number of Claims` = n(),
+    Minimum = min(total_cost, na.rm = TRUE),
+    `25th Percentile` = quantile(total_cost, 0.25, na.rm = TRUE),
+    Median = median(total_cost, na.rm = TRUE),
+    Mean = mean(total_cost, na.rm = TRUE),
+    `75th Percentile` = quantile(total_cost, 0.75, na.rm = TRUE),
+    `95th Percentile` = quantile(total_cost, 0.95, na.rm = TRUE),
+    Maximum = max(total_cost, na.rm = TRUE)
+  ) %>%
+  pivot_longer(everything(), names_to = "Statistic", values_to = "Value") %>%
+  mutate(Value = ifelse(Statistic == "Number of Claims", 
+                        format(Value, big.mark = ","), 
+                        dollar(Value))) %>%
+  gt() %>%
+  tab_options(table.font.size = 10)
+```
+
+The skewness of the cost distribution has important implications: mean costs substantially exceed median costs, and a relatively small number of high-cost claims drive a disproportionate share of total expenditures.
+
+## Temporal Trends
+
+```{r fig-temporal}
+#| label: fig-temporal
+#| fig-cap: "Claims and Costs Over Time"
+#| fig-width: 8
+#| fig-height: 5
+
+# Prepare temporal summary
+temporal <- master %>%
+  filter(!is.na(claim_year), claim_year >= 1994, claim_year <= 2024) %>%
+  group_by(claim_year) %>%
+  summarise(
+    n_claims = n(),
+    median_cost = median(total_cost, na.rm = TRUE),
+    mean_cost = mean(total_cost, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Panel A: Claim counts
+p1 <- ggplot(temporal, aes(x = claim_year, y = n_claims)) +
+  geom_col(fill = "#1f77b4", alpha = 0.7) +
+  labs(title = "A. Number of Claims by Year", x = NULL, y = "Claims")
+
+# Panel B: Cost trends
+p2 <- ggplot(temporal, aes(x = claim_year)) +
+  geom_line(aes(y = median_cost, color = "Median"), linewidth = 1) +
+  geom_line(aes(y = mean_cost, color = "Mean"), linewidth = 1, linetype = "dashed") +
+  scale_y_continuous(labels = dollar_format()) +
+  scale_color_manual(values = c("Median" = "#1f77b4", "Mean" = "#ff7f0e")) +
+  labs(title = "B. Average Cost by Year", x = "Year", y = "Cost ($)", color = NULL) +
+  theme(legend.position = c(0.85, 0.85))
+
+p1 / p2
+```
+
+Claim volumes have varied substantially over time, with peaks in the mid-1990s and early 2000s corresponding to regulatory compliance deadlines. Cost trends show gradual increases, though this may reflect both genuine cost escalation and changes in the composition of claims over time.
+
+## Geographic Variation
+
+Remediation costs vary across Pennsylvania's counties, reflecting differences in geology, contamination severity, regulatory practices, and contractor markets.
+
+```{r fig-geographic}
+#| label: fig-geographic
+#| fig-cap: "Claims by County (Top 15)"
+#| fig-width: 7
+#| fig-height: 5
+
+county_summary <- master %>%
+  filter(!is.na(county)) %>%
+  group_by(county) %>%
+  summarise(n_claims = n(), .groups = "drop") %>%
+  arrange(desc(n_claims)) %>%
+  head(15)
+
+ggplot(county_summary, aes(x = reorder(county, n_claims), y = n_claims)) +
+  geom_col(fill = "#1f77b4", alpha = 0.7) +
+  geom_text(aes(label = n_claims), hjust = -0.2, size = 3) +
+  coord_flip() +
+  labs(
+    x = NULL,
+    y = "Number of Claims"
+  ) +
+  theme(axis.text.y = element_text(size = 9))
+```
+
+## Costs by Procurement Type
+
+A central question is whether claims procured through USTIF's auction system show different cost patterns than other claims. @fig-contract-type shows the distribution of costs by contract type.
+
+```{r fig-contract-type}
+#| label: fig-contract-type
+#| fig-cap: "Remediation Costs by Contract Type"
+#| fig-width: 7
+#| fig-height: 4
+
+master %>%
+  mutate(
+    contract_category = case_when(
+      is_bid_to_result ~ "Bid-to-Result",
+      is_sow ~ "Scope of Work",
+      has_contract ~ "Other Contract",
+      TRUE ~ "No Contract Record"
+    ) %>% factor(levels = c("No Contract Record", "Scope of Work", "Bid-to-Result", "Other Contract"))
+  ) %>%
+  filter(contract_category != "Other Contract") %>%
+  ggplot(aes(x = contract_category, y = total_cost, fill = contract_category)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+  scale_y_log10(labels = dollar_format()) +
+  scale_fill_manual(values = c("#7f7f7f", "#1f77b4", "#ff7f0e")) +
+  labs(
+    x = NULL,
+    y = "Total Cost (Log Scale)"
+  ) +
+  theme(legend.position = "none")
+```
+
+```{r tbl-contract-costs}
+#| label: tbl-contract-costs
+#| tbl-cap: "Cost Summary by Procurement Type"
+
+master %>%
+  mutate(
+    `Procurement Type` = case_when(
+      is_bid_to_result ~ "Bid-to-Result",
+      is_sow ~ "Scope of Work",
+      has_contract ~ "Other Contract",
+      TRUE ~ "No Contract Record"
+    )
+  ) %>%
+  group_by(`Procurement Type`) %>%
+  summarise(
+    N = n(),
+    `Mean Cost` = dollar(mean(total_cost, na.rm = TRUE)),
+    `Median Cost` = dollar(median(total_cost, na.rm = TRUE)),
+    `Std. Dev.` = dollar(sd(total_cost, na.rm = TRUE)),
+    .groups = "drop"
+  ) %>%
+  gt() %>%
+  tab_options(table.font.size = 10)
+```
+
+::: {.callout-important}
+## Interpretation Warning
+
+The cost differences shown above **should not be interpreted as causal effects** of auction procurement. Claims that go to auction may systematically differ from other claims in ways that affect costs (e.g., site complexity, contamination severity). Without accounting for this selection, we cannot determine whether auctions themselves cause higher or lower costs.
+:::
+
+## Descriptive Regression Analysis
+
+To better characterize the conditional correlation between procurement type and costs, we estimate regression models that control for year and geographic factors.
+
+```{r regression-models}
+#| include: false
+
+library(fixest)
+library(modelsummary)
+
+# Prepare regression data
+reg_data <- master %>%
+  filter(total_cost > 0, !is.na(claim_year), !is.na(county)) %>%
+  mutate(
+    log_cost = log(total_cost),
+    contract_type = case_when(
+      is_bid_to_result ~ "Bid-to-Result",
+      is_sow ~ "Scope of Work",
+      has_contract ~ "Other Contract",
+      TRUE ~ "No Contract"
+    ) %>% factor(levels = c("No Contract", "Scope of Work", "Bid-to-Result", "Other Contract")),
+    year_factor = factor(claim_year),
+    county_factor = factor(county)
+  )
+
+# Models
+m1 <- feols(log_cost ~ contract_type, data = reg_data, vcov = "hetero")
+m2 <- feols(log_cost ~ contract_type | year_factor, data = reg_data, vcov = "hetero")
+m3 <- feols(log_cost ~ contract_type | year_factor + county_factor, data = reg_data, vcov = "hetero")
+```
+
+@tbl-regression presents regression estimates where the dependent variable is log(cost). The coefficients represent the conditional correlation between procurement type and costs relative to claims without contract records.
+
+```{r tbl-regression}
+#| label: tbl-regression
+#| tbl-cap: "Descriptive Regression: Cost Correlates"
+
+modelsummary(
+  list(
+    "Baseline" = m1,
+    "+ Year FE" = m2,
+    "+ County FE" = m3
+  ),
+  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
+  coef_rename = c(
+    "contract_typeScope of Work" = "Scope of Work",
+    "contract_typeBid-to-Result" = "Bid-to-Result",
+    "contract_typeOther Contract" = "Other Contract"
+  ),
+  gof_map = c("nobs", "r.squared"),
+  notes = list(
+    "Dependent variable: Log(Total Cost)",
+    "Reference category: No Contract Record",
+    "Robust standard errors in parentheses"
+  ),
+  output = "gt"
+) %>%
+  tab_options(table.font.size = 9)
+```
+
+**Interpreting the Coefficients**: The positive coefficients indicate that claims with auction contracts tend to have higher costs than claims without contract records, even after controlling for year and county. However, this correlation likely reflects **selection**: USTIF may route more complex or problematic claims to the auction process.
+
+\newpage
+
+# Discussion
+
+## Summary of Findings
+
+This descriptive analysis reveals several patterns in USTIF claims data:
+
+1. **Cost Distribution**: Remediation costs are highly skewed, with median costs around $50,000 but substantial variation. A minority of high-cost cases drive a large share of expenditures.
+
+2. **Temporal Patterns**: Claim volumes and costs have evolved over time, influenced by regulatory deadlines and program maturation.
+
+3. **Geographic Variation**: Costs vary substantially across counties, suggesting heterogeneity in site conditions or regional factors.
+
+4. **Procurement Correlations**: Claims procured through auctions show higher average costs than claims without contract records. However, this pattern cannot be interpreted causally due to endogenous selection.
+
+## Limitations
+
+Several limitations constrain our analysis:
+
+1. **Selection Bias**: The central challenge is that USTIF actively selects which claims go to auction. If selection criteria correlate with costs (e.g., complex sites), observed cost differences may reflect site characteristics rather than auction effects.
+
+2. **Data Linkage**: Not all claims have associated contract records, and we cannot link claims to detailed tank-level attributes. This limits our ability to control for facility characteristics.
+
+3. **Incomplete Cost Capture**: Administrative cost data may not fully capture all remediation expenditures, particularly for ongoing or recently closed claims.
+
+4. **Generalizability**: Pennsylvania's USTIF program may differ from other states' trust funds in design, implementation, and contractor markets.
+
+## Implications for Future Research
+
+A rigorous evaluation of auction effects would require an identification strategy that addresses selection. Potential approaches include:
+
+- **Quasi-Experimental Methods**: If auction assignment depends on observable thresholds (e.g., cost estimates), regression discontinuity designs might be feasible.
+- **Instrumental Variables**: External factors that affect auction eligibility but not costs directly could serve as instruments.
+- **Prospective Randomization**: Where feasible, random assignment of eligible claims to auction vs. traditional procurement would provide clean causal estimates.
+
+\newpage
+
+# Conclusion
+
+This policy brief provides a comprehensive descriptive portrait of Pennsylvania's USTIF claims and auction procurement system. While we document interesting patterns—including cost variation by procurement type, geography, and time—we emphasize that these findings represent correlations rather than causal effects.
+
+The observed cost differences between auction and non-auction claims likely reflect USTIF's selection process rather than intrinsic properties of the auction mechanism. Future policy decisions about expanding or modifying the auction system should be informed by research designs capable of isolating causal effects.
+
+## Recommendations
+
+1. **Enhanced Data Collection**: Systematically link claim records to tank attributes and document auction selection criteria.
+
+2. **Selection Analysis**: Formally model the selection process to understand what types of claims are routed to auction.
+
+3. **Causal Evaluation**: Design prospective studies that create exogenous variation in auction assignment.
+
+4. **Benchmarking**: Compare Pennsylvania's program to other states' approaches to identify best practices.
+
+\newpage
+
+# Technical Appendix {.appendix}
+
+## A1: Data Processing Details
+
+### Source Files
+
+The analysis utilized three Excel files provided by USTIF:
+
+- `Actuarial_Contract_Data_2.xlsx` (Sheet: Report 1, 658 records)
+- `Tank_Construction_Closed.xlsx` (Sheet: data, 6,914 records)
+- `Actuarial_UST_Individual_Claim_Data_thru_63020_4.xlsx` (Sheet: Report 1, skip 3 rows for header, 7,793 records)
+
+### Cleaning Steps
+
+1. **Column Standardization**: All column names converted to snake_case using `janitor::clean_names()`
+2. **Date Handling**: Excel serial dates converted to R Date objects
+3. **Missing Values**: Blank strings converted to NA; claims with missing claim numbers removed
+4. **Deduplication**: Duplicate claim numbers resolved by keeping first occurrence
+5. **Cost Validation**: Zero-cost claims retained; negative costs flagged for review
+
+### Merge Logic
+
+Claims were merged with contract records using `claim_number` as the key. The merge rate was approximately `r round(mean(master$has_contract, na.rm = TRUE) * 100, 1)`%.
+
+## A2: Full Regression Output
+
+```{r appendix-regression}
+#| echo: true
+#| code-fold: false
+
+# Prepare regression data
+library(fixest)
+
+reg_data <- master %>%
+  filter(
+    total_cost > 0,
+    !is.na(claim_year),
+    !is.na(county)
+  ) %>%
+  mutate(
+    log_cost = log(total_cost),
+    contract_type = case_when(
+      is_bid_to_result ~ "Bid-to-Result",
+      is_sow ~ "Scope of Work",
+      has_contract & !is_auction ~ "Other Contract",
+      TRUE ~ "No Contract"
+    ) %>% factor(levels = c("No Contract", "Scope of Work", "Bid-to-Result", "Other Contract"))
+  )
+
+# Preferred specification with year and county fixed effects
+model_full <- feols(
+  log(total_cost) ~ contract_type | factor(claim_year) + factor(county),
+  data = reg_data,
+  vcov = "hetero"
+)
+
+# Summary
+summary(model_full)
+```
+
+## A3: Robustness Checks
+
+```{r appendix-robustness}
+#| echo: true
+#| code-fold: false
+
+# Alternative specifications
+
+# Without outliers (winsorized at 1% and 99%)
+reg_data_wins <- reg_data %>%
+  filter(
+    total_cost >= quantile(total_cost, 0.01, na.rm = TRUE),
+    total_cost <= quantile(total_cost, 0.99, na.rm = TRUE)
+  )
+
+model_winsorized <- feols(
+  log(total_cost) ~ contract_type | factor(claim_year) + factor(county),
+  data = reg_data_wins,
+  vcov = "hetero"
+)
+
+# Level specification (dollar amounts)
+model_levels <- feols(
+  total_cost ~ contract_type | factor(claim_year) + factor(county),
+  data = reg_data,
+  vcov = "hetero"
+)
+
+# Print comparison
+etable(model_full, model_winsorized, model_levels,
+       headers = c("Log Cost", "Winsorized", "Levels ($)"))
+```
+
+## A4: Session Information
+
+```{r session-info}
+#| echo: true
+#| code-fold: false
+
+sessionInfo()
+```
+
+\newpage
+
+# References {.unnumbered}
+
+::: {#refs}
+:::

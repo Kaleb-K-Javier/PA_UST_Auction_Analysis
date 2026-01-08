@@ -1,0 +1,555 @@
+# PA UST Tank Data Processing Guide
+
+This document provides comprehensive instructions for processing Pennsylvania Underground Storage Tank (UST) data from multiple sources (Active and Inactive tank databases) and transforming component data from long to wide format.
+
+**Implementation Environment:** R using `data.table` and other best practices for efficient data manipulation.
+
+---
+
+## Column Name Mapping
+
+| Active Tank Data Names        | Inactive Tank Data Names     | My Mapping                  |
+|-------------------------------|------------------------------|-----------------------------|
+| PF_OTHER_ID                   | OTHER_ID                     | FAC_ID                      |
+| SEQUENCE_NUMBER               | SEQ_NUMBER                   | TANK_ID                     |
+| TANK_CODE                     | TANK_CODE                    | TANK_TYPE                   |
+| DATE_INSTALLED                | INSTALLED_DATE               | DATE_INSTALLED              |
+| CAPACITY                      | CAPACITY                     | CAPACITY                    |
+| SUBSTANCE_CODE                | SUBSTANCE_CODE               | SUBSTANCE_CODE              |
+| STATUS_CODE                   | STATUS_CODE                  | STATUS_CODE                 |
+| STATUS                        | STATUS                       | Tank_Status_Meaning         |
+| STATUS_CODE_DATE_END          | STATUS_DATE                  | Tank_Status_Date            |
+| *Missing - needs to be filled* | STATUS_DESCRIPTION           | Tank_Status_Meaning         |
+
+**Note on Status Mapping:**
+- `STATUS_DESCRIPTION` from inactive tanks provides descriptive status text
+- This should be mapped to `Tank_Status_Meaning` to harmonize with active tank data
+- Active tank data may need this information added from another source or derived from `STATUS_CODE`
+
+## Substance Codes
+
+| Code  | Description                                    |
+|-------|------------------------------------------------|
+| AVGAS | Aviation Gasoline                              |
+| BIDSL | Biodiesel                                      |
+| DIESL | Diesel Fuel                                    |
+| ETHNL | Ethanol                                        |
+| FO    | Fuel Oil                                       |
+| GAS   | Gasoline                                       |
+| GASOL | Gasohol (≥15 percent alcohol)                  |
+| HO    | Heating Oil                                    |
+| HZPRL | Hazardous mixed with Petroleum                 |
+| HZSUB | Hazardous Substance                            |
+| JET   | Jet Fuel                                       |
+| KERO  | Kerosene                                       |
+| NMO   | New Motor Oil                                  |
+| NPOIL | Nonpetroleum Oil                               |
+| OTHER | Other                                          |
+| UMO   | Used Motor Oil                                 |
+| UNK   | Unknown                                        |
+| USDOL | Used Oil                                       |
+| WO    | Waste Oil                                      |
+
+## Status Codes
+
+| Code | Description                |
+|------|----------------------------|
+| C    | Currently In Use           |
+| T    | Temporarily Out of Use     |
+
+## Data Processing Workflow
+
+### Step 1: Load and Harmonize Tank Data
+
+1. **Load Active and Inactive Tank Data**
+   - Read both datasets into `data.table` objects
+   - Ensure consistent column types (especially for IDs and dates)
+
+2. **Rename Columns According to Mapping Table**
+   - Use the mapping in the "Column Name Mapping" section above
+   - Standardize all column names to the "My Mapping" values using `setnames()` or column selection during merge
+
+3. **Standardize TANK_ID Format** (Critical Step)
+   - Parse sequence numbers differently based on source database
+   - See "Tank Sequence Number Formatting" section below for detailed rules
+
+4. **Filter ASTs (Aboveground Storage Tanks)**
+   - Filter out records where `TANK_TYPE == "AST"` or sequence number ends with "A"
+   - Retain only `TANK_TYPE == "UST"` records for analysis
+
+5. **Merge Active and Inactive Data**
+   - Merge on `FAC_ID` and `TANK_ID` after standardization
+   - Use appropriate join type (likely `full_outer_join` or combine with `rbindlist()` after harmonization)
+   - Handle duplicate records appropriately
+
+### Step 2: Process Component Data
+
+1. **Load Component Data**
+   - Read component table into `data.table`
+   
+2. **Harmonize Component Column Names**
+   - Apply mappings from "Table Components Variables" section
+   - Ensure `FAC_ID` and `TANK_ID` match the standardized format from Step 1
+
+3. **Link Components to Tanks**
+   - Join component data with tank data on `FAC_ID` and `TANK_ID`
+   - Note: `SUB_FACILITY_ID` is NOT linked to `TANK_ID` - do not use for joining
+   - `TANK_NAME` in component data is `TANK_ID` but may be clean integers (no padding)
+
+4. **Identify Component Types**
+   - Classify each component as either "Part Name" or "Yes/No Variable"
+   - See "Widening Component Data" section for identification rules
+
+5. **Widen Component Data**
+   - Transform from long to wide format
+   - See detailed instructions in "Widening Component Data" section
+
+## Tank Sequence Number Formatting
+
+### Format Differences by Database
+
+| Database        | Raw Format Example    | Parsing Rule                                    | Extracted Value | R Implementation Hint                    |
+|-----------------|----------------------|------------------------------------------------|-----------------|------------------------------------------|
+| Active Tanks    | `001A`, `001`, `002A`, `002` | No hyphen - padded zeros, "A" suffix for ASTs | `001A`, `001`, `002A`, `002` | Use as-is, but note AST suffix           |
+| Inactive Tanks  | `606813 - 001`       | Extract value after hyphen (trim whitespace)   | `001`           | `strsplit(SEQUENCE_NUMBER, " - ")[[2]]`  |
+
+### Detailed Parsing Rules
+
+**Active Tanks:**
+- Format: Padded numeric strings with optional "A" suffix (e.g., `001`, `001A`, `002`, `002A`)
+- No hyphen separator
+- "A" suffix indicates AST (Aboveground Storage Tank) - these should be filtered out
+- Keep the full sequence number as-is for `TANK_ID`
+- **R Implementation**: 
+  ```r
+  # Already in correct format, just ensure character type
+  active_dt[, TANK_ID := as.character(SEQUENCE_NUMBER)]
+  ```
+
+**Inactive Tanks:**
+- Format: Numeric prefix, hyphen separator, numeric suffix (e.g., `606813 - 001`)
+- The value BEFORE the hyphen is facility-related and should be ignored
+- The value AFTER the hyphen is the tank sequence number (may also have "A" suffix for ASTs)
+- Trim whitespace after extraction
+- **R Implementation**:
+  ```r
+  # Extract value after hyphen
+  inactive_dt[, TANK_ID := trimws(strsplit(SEQ_NUMBER, " - ")[[2]], which = "both"), 
+              by = SEQ_NUMBER]
+  # Or using data.table:
+  inactive_dt[, TANK_ID := sub("^[0-9]+ - ([0-9A]+)$", "\\1", SEQ_NUMBER)]
+  ```
+
+### Critical Notes
+
+1. **AST Filtering**: ASTs (Aboveground Storage Tanks) can be identified by:
+   - Sequence numbers ending with "A" (in both active and inactive databases)
+   - The `TANK_TYPE` (formerly `TANK_CODE`) column which contains "AST" or "UST" values
+   
+2. **Recommended Filtering Approach**: 
+   - Use `TANK_TYPE == "UST"` as primary filter (most reliable)
+   - As secondary check, filter out records where `grepl("A$", TANK_ID)` is TRUE
+   - **R Implementation**:
+     ```r
+     dt_clean <- dt[TANK_TYPE == "UST" & !grepl("A$", TANK_ID)]
+     ```
+
+3. **After Standardization**: 
+   - Both active and inactive `TANK_ID` values should be comparable character strings
+   - Active: `"001"`, `"002"`, etc.
+   - Inactive: `"001"`, `"002"`, etc. (extracted after hyphen)
+   - Both formats may include "A" suffix which should be filtered out
+
+4. **Component Data TANK_ID**: 
+   - In component tables, `TANK_NAME` represents `TANK_ID`
+   - These appear as clean integers with no padded zeros (e.g., `1`, `2`, `3` instead of `001`, `002`)
+   - **Matching Strategy**: Convert both to numeric for matching, or pad component `TANK_ID` to match tank data format
+   - **R Implementation**:
+     ```r
+     # Option 1: Convert both to numeric for matching
+     tank_dt[, TANK_ID_NUM := as.numeric(gsub("A$", "", TANK_ID))]
+     comp_dt[, TANK_ID_NUM := as.numeric(TANK_NAME)]
+     # Then merge on FAC_ID and TANK_ID_NUM
+     
+     # Option 2: Pad component TANK_ID
+     comp_dt[, TANK_ID := sprintf("%03d", as.numeric(TANK_NAME))]
+     ```
+
+## Table Components Variables
+
+| Variable Name   | Variable Meaning                                                                                     | My Mapping                  |
+|-----------------|------------------------------------------------------------------------------------------------------|-----------------------------|
+| ICS_CODE        | REGION_ICS_CODE that is a numerical mapping to one of the PA regions.                                | REGION_ICS_CODE             |
+| FAC_ID          | Facility ID                                                                                          | FAC_ID                      |
+| F_NAME          | Facility Name                                                                                        | FACILITY_NAME               |
+| SUB_FAC_ID      | This is a tank specific ID but it's not linked to the TANK_Sequence_ID.                              | SUB_FACILITY_ID             |
+| TANK_NAME       | TANK_Sequence_ID, but note we need to take care. Here they seem to be clean integers with no padded zeros. | TANK_ID                     |
+| CAPACITY        | Tank capacity                                                                                        | CAPACITY                    |
+| STATUS          | STATUS_CODE                                                                                          | STATUS_CODE                 |
+| BEGIN_DATE      | Component specific begin date - when the component was installed/started                             | COMPONENT_BEGIN_DATE        |
+
+**Date Handling Notes:**
+- Standardize all date columns to consistent format (recommend Date class in R)
+- Handle missing dates appropriately (use `NA` for missing dates)
+- `DATE_INSTALLED`: Tank installation date (may differ from component dates)
+- `COMPONENT_BEGIN_DATE`: Specific to each component - may have multiple dates per tank
+- `Tank_Status_Date`: Date when current status code began
+- **R Implementation**: 
+  ```r
+  # Convert dates consistently
+  dt[, DATE_INSTALLED := as.Date(DATE_INSTALLED, format = "%Y-%m-%d")]
+  dt[, COMPONENT_BEGIN_DATE := as.Date(BEGIN_DATE, format = "%Y-%m-%d")]
+  # Handle various date formats as needed
+  ```
+| ATTRIBUTE       | ATTRIBUTE code mapping of parts, typically integer like [number][number][letter]                     | COMPONENT_ATTRIBUTE_CODE    |
+| DESCRIPTION     | The long name definition of the attribute code, long character strings. The attribute and its description are large categories and the next column tells us what type. | COMPONENT_CATEGORY          |
+| DESCRIPTION_1   | The specific type of component being used, a character text string.<br>To get a universal set of what values are possible for each component group, we would need to group by DESCRIPTION and tally the types of descriptions that exist within each DESCRIPTION_1. | COMPONENT_TYPE              |
+
+## Widening Component Data
+
+### Overview
+
+Transform component data from long to wide format after harmonizing and linking to tank data. The transformation requires different handling for two types of components:
+
+1. **Part Names**: Components with specific part type names (descriptive component types)
+2. **Yes/No Variables**: Components with Yes/No/None/Not Applicable responses
+
+**Pre-Processing Steps:**
+1. Ensure component data is harmonized (see "Table Components Variables" section)
+2. Join component data with tank data on `FAC_ID` and `TANK_ID` (note: match `TANK_NAME` from components with `TANK_ID` from tanks)
+3. Filter to remove any components not linked to tanks (left join to retain all tanks)
+4. Identify and classify component types
+
+### Identifying Component Types
+
+The component type determines how the data should be widened. Use both the `COMPONENT_ATTRIBUTE_CODE` pattern and `COMPONENT_TYPE` values to classify.
+
+| Component Type     | Identification Rule                                                                                | Example                                          | Edge Cases                                |
+|--------------------|-----------------------------------------------------------------------------------------------------|--------------------------------------------------|-------------------------------------------|
+| Part Names         | `COMPONENT_ATTRIBUTE_CODE` does NOT end with "Y" or "N"<br>AND `COMPONENT_TYPE` contains specific part names (not Yes/No/None/Not Applicable responses) | `COMPONENT_ATTRIBUTE_CODE = "12E"`<br>`COMPONENT_TYPE = "AUTOMATIC TANK GAUGING"` | Handle empty/missing COMPONENT_TYPE       |
+| Yes/No Variables   | `COMPONENT_ATTRIBUTE_CODE` ends with "Y" or "N"<br>OR `COMPONENT_TYPE` is one of: "YES", "NO", "NONE", "NOT IN CONTACT W/ GROUND" | `COMPONENT_ATTRIBUTE_CODE = "18N"` (ends in N)<br>`COMPONENT_TYPE = "NO"` | Handle case variations                    |
+
+**R Implementation for Classification:**
+```r
+# Identify Yes/No variables by attribute code pattern
+comp_dt[, is_yesno := grepl("(Y|N)$", COMPONENT_ATTRIBUTE_CODE, ignore.case = TRUE)]
+
+# Also check COMPONENT_TYPE for Yes/No indicators
+yesno_types <- c("YES", "NO", "NONE", "NOT IN CONTACT W/ GROUND", 
+                 "NOT APPLICABLE", "NA")
+comp_dt[, is_yesno := is_yesno | toupper(COMPONENT_TYPE) %in% yesno_types]
+
+# Part names are everything else
+comp_dt[, component_type := fifelse(is_yesno, "yesno", "part_name")]
+```
+
+**Important Notes:**
+- Some `COMPONENT_CATEGORY` values may have both part names and Yes/No responses - classify at the row level, not category level
+- A single `COMPONENT_CATEGORY` can have multiple parts (e.g., multiple detection methods for one tank)
+- Each tank may have multiple rows for the same `COMPONENT_CATEGORY` if multiple parts are present
+
+### Widening Part Name Components
+
+For components where `COMPONENT_CATEGORY` represents part names, create two types of columns:
+1. **Category Column**: Named after `COMPONENT_CATEGORY`, contains the part name(s) from `COMPONENT_TYPE`
+2. **Part Indicator Columns**: One binary column per unique `COMPONENT_TYPE` value, indicating presence (1) or absence (0)
+
+**Input Data (Long Format):**
+| FAC_ID | TANK_ID | COMPONENT_CATEGORY           | COMPONENT_ATTRIBUTE_CODE | COMPONENT_TYPE                |
+|--------|---------|------------------------------|--------------------------|-------------------------------|
+| 1234   | abc     | TANK RELEASE DETECTION METHOD| 12E                      | AUTOMATIC TANK GAUGING        |
+| 1234   | abc     | TANK RELEASE DETECTION METHOD| 13A                      | GROUNDWATER MONITORING         |
+| 5678   | xyz     | TANK RELEASE DETECTION METHOD| 12E                      | AUTOMATIC TANK GAUGING        |
+
+**Output Data (Wide Format):**
+| FAC_ID | TANK_ID | TANK RELEASE DETECTION METHOD        | AUTOMATIC TANK GAUGING | GROUNDWATER MONITORING |
+|--------|---------|--------------------------------------|------------------------|------------------------|
+| 1234   | abc     | AUTOMATIC TANK GAUGING, GROUNDWATER MONITORING | 1                      | 1                      |
+| 5678   | xyz     | AUTOMATIC TANK GAUGING               | 1                      | 0                      |
+
+**Transformation Rules:**
+
+1. **Category Column** (named after `COMPONENT_CATEGORY`):
+   - For each unique `FAC_ID` + `TANK_ID` + `COMPONENT_CATEGORY` combination:
+     - If multiple parts exist: concatenate all `COMPONENT_TYPE` values (e.g., comma-separated: `"AUTOMATIC TANK GAUGING, GROUNDWATER MONITORING"`)
+     - If single part: use that `COMPONENT_TYPE` value
+     - If no parts: use `NA` or empty string
+   - **R Implementation**:
+     ```r
+     # Create category column with concatenated part names
+     comp_parts <- comp_dt[component_type == "part_name"]
+     comp_parts[, part_list := paste(COMPONENT_TYPE, collapse = ", "), 
+                by = .(FAC_ID, TANK_ID, COMPONENT_CATEGORY)]
+     comp_wide_parts <- dcast(comp_parts, 
+                              FAC_ID + TANK_ID ~ COMPONENT_CATEGORY, 
+                              value.var = "part_list", 
+                              fun.aggregate = function(x) paste(unique(x), collapse = ", "))
+     ```
+
+2. **Part Indicator Columns** (one per unique `COMPONENT_TYPE`):
+   - Create a binary (0/1) column for each unique part name in `COMPONENT_TYPE`
+   - Column name = the part name (e.g., `AUTOMATIC TANK GAUGING`)
+   - Value = `1` if that part is present for the tank, `0` otherwise
+   - **R Implementation**:
+     ```r
+     # Create binary indicators for each part
+     comp_parts[, part_present := 1L]
+     comp_wide_indicators <- dcast(comp_parts, 
+                                   FAC_ID + TANK_ID ~ COMPONENT_TYPE, 
+                                   value.var = "part_present", 
+                                   fun.aggregate = function(x) 1L, 
+                                   fill = 0L)
+     # Note: All tanks should be included (even those without components)
+     # Use merge to ensure all tanks have 0 for parts they don't have
+     ```
+
+**Handling Multiple Parts per Category:**
+- When a tank has multiple parts in the same category, concatenate them in the category column
+- Each part gets its own binary indicator column
+- Example: Tank with both "AUTOMATIC TANK GAUGING" and "GROUNDWATER MONITORING" for "TANK RELEASE DETECTION METHOD" will have:
+  - Category column: `"AUTOMATIC TANK GAUGING, GROUNDWATER MONITORING"`
+  - Indicator columns: `AUTOMATIC TANK GAUGING = 1`, `GROUNDWATER MONITORING = 1`
+
+**Edge Cases:**
+- Empty/missing `COMPONENT_TYPE`: Use `NA` for category column, `0` for all indicator columns
+- Tanks with no components in a category: Use `NA` for category column, `0` for all indicator columns
+- Ensure all tanks are represented in output (use `all = TRUE` in merge or join operations)
+
+### Widening Yes/No Variables
+
+For components where `COMPONENT_CATEGORY` represents Yes/No questions, create a single binary column for each category.
+
+**Input Data (Long Format):**
+| FAC_ID | TANK_ID | COMPONENT_CATEGORY              | COMPONENT_ATTRIBUTE_CODE | COMPONENT_TYPE |
+|--------|---------|--------------------------------|--------------------------|----------------|
+| 1234   | abc     | UST TOTAL SECONDARILY CONTAINED | 18N                      | NO             |
+| 1234   | abc     | UST PIPING SECONDARILY CONTAINED| 19Y                      | YES            |
+| 5678   | xyz     | UST TOTAL SECONDARILY CONTAINED | 18Y                      | YES            |
+
+**Output Data (Wide Format):**
+| FAC_ID | TANK_ID | UST TOTAL SECONDARILY CONTAINED | UST PIPING SECONDARILY CONTAINED |
+|--------|---------|--------------------------------|--------------------------------|
+| 1234   | abc     | 0                              | 1                              |
+| 5678   | xyz     | 1                              | 0                              |
+
+**Transformation Rules:**
+
+1. **Create Binary Column** (named after `COMPONENT_CATEGORY`):
+   - Value = `1` if the answer is "Yes" or affirmative
+   - Value = `0` if the answer is "No", "None", or negative
+   
+2. **Determining Yes/No Status** (use in order of preference):
+   - **Primary**: Check `COMPONENT_ATTRIBUTE_CODE` pattern:
+     - Ends with "Y" (case-insensitive) → `1`
+     - Ends with "N" (case-insensitive) → `0`
+   - **Secondary**: Check `COMPONENT_TYPE` value:
+     - "YES" → `1`
+     - "NO", "NONE", "NOT IN CONTACT W/ GROUND", "NOT APPLICABLE" → `0`
+   - **Fallback**: If neither pattern matches, log for review and assign `NA`
+   
+3. **R Implementation**:
+   ```r
+   # Filter to Yes/No components
+   comp_yesno <- comp_dt[component_type == "yesno"]
+   
+   # Determine binary value
+   comp_yesno[, binary_value := fifelse(
+     grepl("Y$", COMPONENT_ATTRIBUTE_CODE, ignore.case = TRUE) | 
+       toupper(COMPONENT_TYPE) %in% c("YES", "Y"),
+     1L,
+     fifelse(
+       grepl("N$", COMPONENT_ATTRIBUTE_CODE, ignore.case = TRUE) | 
+         toupper(COMPONENT_TYPE) %in% c("NO", "NONE", "NOT IN CONTACT W/ GROUND", "NOT APPLICABLE", "NA", "N"),
+       0L,
+       NA_integer_  # Log these for review
+     )
+   )]
+   
+   # Pivot wide - use max or first since should be one value per category per tank
+   comp_wide_yesno <- dcast(comp_yesno, 
+                            FAC_ID + TANK_ID ~ COMPONENT_CATEGORY, 
+                            value.var = "binary_value", 
+                            fun.aggregate = function(x) {
+                              x <- x[!is.na(x)]
+                              if(length(x) > 0) max(x) else NA_integer_
+                            },
+                            fill = 0L)  # Default to 0 if category not present
+   ```
+
+**Handling Multiple Rows per Category:**
+- In theory, each tank should have only one Yes/No response per category
+- If multiple rows exist for same `FAC_ID` + `TANK_ID` + `COMPONENT_CATEGORY`:
+  - Check for consistency (all same value) - if inconsistent, log for review
+  - Use `max()` or `first()` as aggregator (or handle according to business rules)
+  - **Data Quality Check**: Flag duplicates for manual review
+
+**Edge Cases:**
+- Missing Yes/No component: Default to `0` (assuming "No" if not explicitly "Yes")
+- Multiple inconsistent values: Flag for manual review, use `NA` or follow business rules
+- Empty/missing `COMPONENT_TYPE` and no pattern in `COMPONENT_ATTRIBUTE_CODE`: Assign `NA` and flag for review
+
+### Complete Example: Combining Part Names and Yes/No Variables
+
+**Before (Long Format):**
+| FAC_ID | TANK_ID | COMPONENT_CATEGORY              | COMPONENT_ATTRIBUTE_CODE | COMPONENT_TYPE                |
+|--------|---------|--------------------------------|--------------------------|-------------------------------|
+| 1234   | abc     | TANK RELEASE DETECTION METHOD   | 12E                      | AUTOMATIC TANK GAUGING        |
+| 1234   | abc     | UST TOTAL SECONDARILY CONTAINED | 18N                      | NO                            |
+| 5678   | xyz     | TANK RELEASE DETECTION METHOD   | 13A                      | GROUNDWATER MONITORING         |
+| 5678   | xyz     | UST TOTAL SECONDARILY CONTAINED | 18Y                      | YES                            |
+
+**After (Wide Format):**
+| FAC_ID | TANK_ID | TANK RELEASE DETECTION METHOD   | AUTOMATIC TANK GAUGING | GROUNDWATER MONITORING | UST TOTAL SECONDARILY CONTAINED |
+|--------|---------|--------------------------------|------------------------|------------------------|--------------------------------|
+| 1234   | abc     | AUTOMATIC TANK GAUGING         | 1                      | 0                      | 0                              |
+| 5678   | xyz     | GROUNDWATER MONITORING         | 0                      | 1                      | 1                              |
+
+### Final Data Integration
+
+**Step 1: Create Separate Wide Datasets**
+1. Create wide dataset for part name components (with both category and indicator columns)
+2. Create wide dataset for Yes/No components (with binary columns)
+
+**Step 2: Merge Component Data**
+```r
+# Merge part name category columns with part indicators
+comp_wide_all <- merge(comp_wide_parts, comp_wide_indicators, 
+                       by = c("FAC_ID", "TANK_ID"), all = TRUE)
+
+# Merge with Yes/No variables
+comp_wide_all <- merge(comp_wide_all, comp_wide_yesno, 
+                       by = c("FAC_ID", "TANK_ID"), all = TRUE)
+```
+
+**Step 3: Merge Components with Tank Data**
+```r
+# Final merge with tank data (left join to keep all tanks)
+tanks_final <- merge(tank_dt, comp_wide_all, 
+                     by = c("FAC_ID", "TANK_ID"), 
+                     all.x = TRUE)  # Keep all tanks even without components
+
+# Fill missing component values appropriately
+# - Category columns: NA (no component present)
+# - Part indicator columns: 0 (part not present)
+# - Yes/No columns: 0 (default to "No" if not present)
+```
+
+## Data Quality Checks
+
+### Pre-Processing Checks
+
+1. **Tank Data Quality:**
+   - Check for duplicate `FAC_ID` + `TANK_ID` combinations
+   - Verify sequence number parsing produced valid `TANK_ID` values
+   - Confirm AST filtering removed all ASTs
+   - Validate date formats for `DATE_INSTALLED` and `Tank_Status_Date`
+   - Check for missing critical fields (`FAC_ID`, `TANK_ID`)
+
+2. **Component Data Quality:**
+   - Verify `FAC_ID` and `TANK_ID` exist in tank data after harmonization
+   - Check for rows where `COMPONENT_TYPE` is missing but `COMPONENT_CATEGORY` exists
+   - Identify `COMPONENT_ATTRIBUTE_CODE` values that don't match expected patterns
+   - Flag components that can't be classified as part name or Yes/No
+
+### Post-Widening Checks
+
+1. **Completeness:**
+   - Verify all tanks from tank data are present in final dataset
+   - Check for tanks with no components (expected - should have 0s or NAs for all component columns)
+   - Identify component categories that appear in data but not in wide format
+
+2. **Consistency:**
+   - Flag duplicate `FAC_ID` + `TANK_ID` + `COMPONENT_CATEGORY` combinations in Yes/No variables
+   - Verify part indicator columns: if category column has part name, corresponding indicator should be 1
+   - Check for logical inconsistencies (e.g., tank marked as having part but category column is NA)
+
+3. **Validation:**
+   - Sample check: manually verify a subset of tanks' component data matches original long format
+   - Verify binary columns contain only 0, 1, or NA
+   - Check that category columns with multiple parts have corresponding indicator columns all set to 1
+
+**R Implementation Example:**
+```r
+# Example data quality checks
+qc_checks <- list(
+  # Check for duplicate tanks
+  duplicate_tanks = tanks_final[, .N, by = .(FAC_ID, TANK_ID)][N > 1],
+  
+  # Check component completeness
+  tanks_without_components = tanks_final[rowSums(is.na(.SD)) == ncol(.SD), 
+                                         .SDcols = patterns("^[A-Z_]+$")],
+  
+  # Verify binary columns
+  non_binary_values = tanks_final[, lapply(.SD, function(x) unique(x[!x %in% c(0, 1, NA)])),
+                                   .SDcols = patterns("^(UST|AST)")]
+  
+  # Check consistency between category and indicator columns
+  # (implementation depends on specific column structure)
+)
+```
+
+---
+
+## Summary and Implementation Checklist
+
+### Complete Processing Pipeline
+
+**Phase 1: Tank Data Harmonization**
+- [ ] Load active and inactive tank data
+- [ ] Apply column name mappings (see "Column Name Mapping" table)
+- [ ] Parse and standardize `TANK_ID` from sequence numbers:
+  - Active: Use as-is (already in correct format)
+  - Inactive: Extract value after hyphen
+  - Handle padded zeros vs clean integers for component matching
+- [ ] Filter out ASTs using `TANK_TYPE == "UST"` (primary) and sequence number pattern (secondary)
+- [ ] Merge active and inactive tank data
+- [ ] Standardize date formats
+- [ ] Run pre-processing data quality checks
+
+**Phase 2: Component Data Processing**
+- [ ] Load component data
+- [ ] Apply column name mappings (see "Table Components Variables" table)
+- [ ] Join component data with tank data on `FAC_ID` and `TANK_ID` (handle format differences)
+- [ ] Classify components as "part_name" or "yesno" using identification rules
+- [ ] Handle edge cases and flag data quality issues
+
+**Phase 3: Widening Component Data**
+- [ ] Create wide dataset for part name components:
+  - Category columns (concatenated part names)
+  - Binary indicator columns (one per unique part)
+- [ ] Create wide dataset for Yes/No components:
+  - Binary columns (one per category)
+- [ ] Merge part name and Yes/No wide datasets
+- [ ] Merge component data with tank data (left join to keep all tanks)
+- [ ] Fill missing values appropriately (NA for categories, 0 for indicators)
+
+**Phase 4: Final Validation**
+- [ ] Run post-widening data quality checks
+- [ ] Verify data completeness and consistency
+- [ ] Sample validation against original long format
+- [ ] Document any data quality issues for manual review
+
+### Key R Packages Required
+
+- `data.table`: Primary data manipulation (essential)
+- `lubridate` or base `as.Date()`: Date handling
+- `stringr` or base `gsub()`: String manipulation for parsing
+- Standard base R functions for validation
+
+### Critical Success Factors
+
+1. **Proper ID Matching**: Ensuring `TANK_ID` formats are compatible between tank and component data
+2. **Complete AST Filtering**: All ASTs must be removed before analysis
+3. **Component Classification**: Correctly identifying part names vs Yes/No variables
+4. **Handling Multiple Parts**: Properly concatenating and creating indicators for tanks with multiple parts per category
+5. **Data Completeness**: Ensuring all tanks are represented even if they have no components
+
+### Expected Output Structure
+
+Final dataset should contain:
+- All columns from harmonized tank data (see "Column Name Mapping" → "My Mapping")
+- Component category columns (one per `COMPONENT_CATEGORY`)
+- Part indicator columns (one per unique `COMPONENT_TYPE` value for part names)
+- Yes/No binary columns (one per `COMPONENT_CATEGORY` for Yes/No variables)
+- One row per unique `FAC_ID` + `TANK_ID` combination
+
