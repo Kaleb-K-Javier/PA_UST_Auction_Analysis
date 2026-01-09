@@ -31,6 +31,8 @@ format:
         \usepackage{adjustbox}
         \usepackage{tabularx}
         \usepackage{array}
+        \usepackage{tikz}
+        \usetikzlibrary{shapes.geometric, arrows.meta, positioning, calc, shadows}
   html:
     toc: true
     toc-depth: 2
@@ -1223,4 +1225,92 @@ include_table("111_var_brings_to_closure_flag")
 ```
 
 [Table Note: Binary indicator for contracts responsible for achieving site closure.]
+
+
+
+
+```{tikz}
+#| label: fig-ustif-process
+#| fig-cap: "USTIF Claims Assignment and Auction Mechanism"
+#| fig-align: center
+#| echo: false
+
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, calc, shadows}
+
+% Define block styles
+\tikzstyle{start} = [rectangle, rounded corners, minimum width=3cm, minimum height=1cm, text centered, draw=black, fill=red!30, drop shadow]
+\tikzstyle{process} = [rectangle, minimum width=3.5cm, minimum height=1cm, text centered, text width=3cm, draw=black, fill=blue!10, drop shadow]
+\tikzstyle{auction} = [rectangle, minimum width=3.5cm, minimum height=1cm, text centered, text width=3.5cm, draw=black, fill=green!15, drop shadow]
+\tikzstyle{decision} = [diamond, minimum width=3cm, minimum height=1cm, text centered, text width=2cm, draw=black, fill=yellow!20, drop shadow]
+\tikzstyle{callout} = [rectangle, rounded corners, minimum width=3cm, minimum height=1cm, text centered, text width=4cm, draw=gray, fill=white, dashed, font=\footnotesize\itshape]
+\tikzstyle{arrow} = [thick,->,>=stealth]
+\tikzstyle{line} = [thick,-]
+
+\begin{tikzpicture}[node distance=2cm]
+
+% --- Phase 1: Intake & Assignment ---
+\node (start) [start] {Claim Initiated / Confirmed Release};
+
+\node (adjuster) [decision, below of=start, yshift=-0.5cm] {ICF Claims Evaluator Review};
+\node (callout_adjuster) [callout, right=1cm of adjuster] {``The Judge'' \\ Application of Bulletin \#5: \\ Is site ``stalled''? Complex? \\ (Tacit Rule of Assignment)};
+\draw [dashed, gray] (adjuster) -- (callout_adjuster);
+
+% --- Path A: Normal Claim (T&M) ---
+\node (tm_neg) [process, left=2.5cm of adjuster, yshift=-2cm] {Time \& Materials (T\&M) Negotiation};
+\node (tm_work) [process, below of=tm_neg] {Remedial Work \\ (Pay-as-you-go)};
+\node (tm_end) [start, below of=tm_work] {Case Closure};
+
+% --- Path B: Auction Process (Treatment) ---
+\node (rfb) [auction, right=2.5cm of adjuster, yshift=-2cm] {RFB Development};
+\node (callout_rfb) [callout, right=0.5cm of rfb] {Defined Scope vs. Bid-to-Result \\ (Creation of Base vs. Optional Milestones)};
+\draw [dashed, gray] (rfb) -- (callout_rfb);
+
+\node (site_visit) [auction, below of=rfb] {Mandatory Pre-Bid \\ Site Meeting};
+
+\node (bids_in) [auction, below of=site_visit] {Bid Submission};
+
+\node (admin_review) [decision, below of=bids_in, yshift=-0.5cm] {Admin Review};
+\node (reject) [process, right=2cm of admin_review, fill=red!10] {Bid Rejected \\ (Non-responsive)};
+
+\node (tech_score) [auction, below of=admin_review, yshift=-0.5cm] {Technical Scoring};
+\node (callout_tech) [callout, right=0.5cm of tech_score] {Threshold Rule: \\ Must score $\ge$ 70-75\% of \\ highest tech score to advance};
+\draw [dashed, gray] (tech_score) -- (callout_tech);
+
+\node (cost_score) [auction, below of=tech_score, yshift=-0.5cm] {Cost Scoring};
+\node (callout_cost) [callout, right=0.5cm of cost_score] {Formula: \\ $(1 - \frac{Bid - Low}{Low}) \times Points$ \\ Penalty if Bid $>$ 2x Low};
+\draw [dashed, gray] (cost_score) -- (callout_cost);
+
+\node (soft_cap) [decision, below of=cost_score, yshift=-1cm] {Determine ``Reasonable \& Necessary'' Cap};
+\node (callout_cap) [callout, left=0.5cm of soft_cap] {The ``Soft Cap'': \\ USTIF sets max payout at \\ highest \textit{acceptable} bid, \\ not necessarily lowest bid.};
+\draw [dashed, gray] (soft_cap) -- (callout_cap);
+
+\node (selection) [auction, below of=soft_cap, yshift=-1cm] {Claimant Selection};
+\node (callout_select) [callout, right=0.5cm of selection] {Principal-Agent Problem: \\ Claimant chooses winner \\ from ``Acceptable'' pool. \\ USTIF pays up to Cap.};
+\draw [dashed, gray] (selection) -- (callout_select);
+
+\node (contract) [start, below of=selection] {Fixed Price Contract Executed};
+
+% --- Arrows ---
+\draw [arrow] (start) -- (adjuster);
+
+% Path A Arrows
+\draw [arrow] (adjuster) -| node[anchor=south] {Routine / Low Complexity} (tm_neg);
+\draw [arrow] (tm_neg) -- (tm_work);
+\draw [arrow] (tm_work) -- (tm_end);
+
+% Path B Arrows
+\draw [arrow] (adjuster) -| node[anchor=south] {High Complexity / Stalled} (rfb);
+\draw [arrow] (rfb) -- (site_visit);
+\draw [arrow] (site_visit) -- (bids_in);
+\draw [arrow] (bids_in) -- (admin_review);
+\draw [arrow] (admin_review) -- node[anchor=west] {Pass} (tech_score);
+\draw [arrow] (admin_review) -- node[anchor=south] {Fail} (reject);
+\draw [arrow] (tech_score) -- (cost_score);
+\draw [arrow] (cost_score) -- (soft_cap);
+\draw [arrow] (soft_cap) -- (selection);
+\draw [arrow] (selection) -- (contract);
+
+\end{tikzpicture}
+``` 
+
 
