@@ -185,6 +185,24 @@ include_table("003_date_defaults")
 [Table Note: The dates listed above are likely system defaults (e.g., 01/01/1900) and should be treated as missing values.]
 
 \newpage
+
+### KNN Date Imputation Diagnostics
+
+[Description: Comparison of reported installation dates vs. KNN-imputed dates for records with suspect default values. KNN regression (k=5) uses capacity, substance type, and region as features.]
+
+```{r knn-imputation-figure}
+#| label: fig-knn-imputation
+#| fig-cap: "KNN Date Imputation Diagnostics: Reported vs. Imputed Installation Years"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+include_figure("003b_knn_imputation_diagnostics")
+```
+
+[Figure Note: Density comparison showing distributional plausibility of KNN-imputed dates relative to observed installation years. Imputed values should align with historical installation patterns.]
+
+\newpage
 # Component Universe
 
 This section details the raw attributes available in the 'Compounds' table. Use these tables to determine which specific attributes to 'hotcode' into binary variables.
@@ -513,9 +531,125 @@ include_table("004_comp_tank_upgrade")
 
 \newpage
 
+# Owner & Business Intelligence
+
+This section characterizes facility ownership structure, business model classification, and market segmentation derived from the harmonized facility linkage table.
+
+## Business Model Distribution
+
+[Description: Classification of facilities by business category based on owner sector and facility count logic.]
+
+```{r business-model-table}
+#| label: tbl-business-model
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("005_business_model_counts")
+```
+
+[Table Note: Business categories derived from owner name pattern matching and facility count thresholds. "Publicly Owned" includes government and municipal entities; "Retail Gas (Branded Commercial)" includes major chains.]
+
+\newpage
+
+## Owner Fleet Size Distribution
+
+[Description: Distribution of facilities and tanks across owner size classes.]
+
+```{r owner-size-table}
+#| label: tbl-owner-size
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("006_owner_size_class_freq")
+```
+
+[Table Note: Owner size classification based on facility count per owner: Single-Site (1), Small Fleet (2-9), Medium Fleet (10-49), Large Fleet/Corporate (50+).]
+
+\newpage
+
+## Owner Sector Breakdown
+
+[Description: Top 25 owner sectors by tank count, derived from owner name pattern classification.]
+
+```{r owner-sector-table}
+#| label: tbl-owner-sector
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("007_owner_sector_freq")
+```
+
+[Table Note: Sector classification uses regex pattern matching on owner names to identify major chains, government entities, utilities, and commercial sectors.]
+
+\newpage
+
+## Facility Operational Status
+
+[Description: Aggregate facility-level operational status based on tank closure patterns.]
+
+```{r facility-status-table}
+#| label: tbl-facility-status
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("008_facility_status_freq")
+```
+
+[Table Note: "Fully Active" = all tanks in use; "Fully Closed" = all tanks closed; "Mixed Status" = some active/some closed.]
+
+\newpage
+
+## Owner Size vs Business Model Cross-Tabulation
+
+[Description: Cross-tabulation of owner fleet size against business category to identify structural patterns.]
+
+```{r owner-business-crosstab-table}
+#| label: tbl-owner-business-crosstab
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("009_owner_size_vs_business_crosstab")
+```
+
+[Table Note: Cell values represent unique facility counts. Useful for identifying which business models are dominated by small vs. large operators.]
+
+\newpage
+
+## Closure Rates by Business Category
+
+[Description: Tank closure rates stratified by business category to identify differential attrition patterns.]
+
+```{r closure-rates-table}
+#| label: tbl-closure-rates
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("010_closure_rates_by_facility_type")
+```
+
+[Table Note: Higher closure rates may indicate market exit, consolidation, or infrastructure modernization patterns specific to certain business types.]
+
+\newpage
+
 # Temporal Evolution & Trends
 
 This section presents visualizations of how tank characteristics, fuel types, and facility attributes have evolved over time. These temporal patterns inform understanding of regulatory compliance trends and infrastructure modernization.
+
+## Capacity Distribution
+
+[Description: Overall distribution of tank capacities across the fleet.]
+
+```{r capacity-distribution-figure}
+#| label: fig-capacity-distribution
+#| fig-cap: "Distribution of Tank Capacities (Gallons)"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+include_figure("005_capacity_distribution")
+```
+
+[Figure Note: Modal peaks at standard capacities (e.g., 10,000, 12,000, 15,000 gallons) indicate industry standardization. Long right tail represents commercial/industrial facilities.]
 
 \newpage
 
@@ -530,7 +664,7 @@ This section presents visualizations of how tank characteristics, fuel types, an
 #| fig-width: 7
 #| fig-height: 4.5
 #| echo: false
-include_figure("005_capacity_evolution_by_decade")
+include_figure("005b_capacity_evolution_by_decade")
 ```
 
 [Figure Note: [Placeholder: Interpretation of capacity trends—have tanks gotten larger over time? Implications for replacement costs and risk assessment.]]
@@ -577,22 +711,6 @@ include_figure("007_tank_lifespan_distribution")
 
 
 \newpage
-
-## Material Evolution
-
-[Description: Temporal trends in tank construction materials (Steel vs. Fiberglass/Composite) over installation periods.]
-
-```{r material-evolution-figure}
-#| label: fig-material-evolution
-#| fig-cap: "Evolution of Tank Construction Materials by Installation Period"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-include_figure("012_material_evolution")
-```
-
-[Figure Note: [Placeholder: Analysis of material shift—transition from steel to fiberglass/composite? Regulatory drivers? Cost and durability implications.]]
 
 # Facility-Level Intelligence
 
@@ -655,3 +773,158 @@ include_figure("010_facility_age_vs_size_scatter")
 
 [Figure Note: [Placeholder: Interpretation of age-size relationship—do older facilities tend to be larger? Implications for modernization costs and operational risk.]]
 
+\newpage
+
+# Fleet Risk & Infrastructure Analytics
+
+This section examines construction-based risk tiers and capacity standardization trends to characterize infrastructure modernization patterns.
+
+## Fleet Risk Tier Transition
+
+[Description: Temporal evolution of tank construction risk tiers based on wall construction (single vs. double) and material type.]
+
+```{r fleet-risk-figure}
+#| label: fig-fleet-risk
+#| fig-cap: "Fleet Risk Tier Transition by Installation Period"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+include_figure("011_fleet_risk_transition")
+```
+
+[Figure Note: Risk tiers derived from TANK CONSTRUCTION component: "High Risk" = bare/single-wall steel; "Medium Risk" = single-wall fiberglass; "Low Risk" = double-walled or jacketed tanks. Transition toward lower-risk construction reflects regulatory evolution (e.g., 1998 EPA deadline).]
+
+\newpage
+
+## Capacity Standardization Trends
+
+[Description: Installation frequency of standard tank capacities over time, showing market convergence on common sizes.]
+
+```{r capacity-standardization-figure}
+#| label: fig-capacity-standardization
+#| fig-cap: "Installation Trends for Standard Tank Capacities (1980+)"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+include_figure("013_capacity_standardization_trends")
+```
+
+[Figure Note: Standard capacities (4000, 6000, 8000, 10000, 12000, 15000, 20000 gallons) shown. Trends indicate market preferences and potential cost efficiencies from standardization.]
+
+\newpage
+
+# Owner & Market Structure Analytics
+
+This section presents visualizations of ownership patterns, market concentration, and temporal evolution of business categories.
+
+## Owner Size Distribution
+
+[Description: Distribution of tank counts across owner size classes.]
+
+```{r owner-size-distribution-figure}
+#| label: fig-owner-size-distribution
+#| fig-cap: "Tank Count Distribution by Owner Size Class"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+include_figure("014_owner_size_distribution")
+```
+
+[Figure Note: Horizontal bar chart showing relative market share by owner fleet size. Single-site operators vs. corporate fleet concentration.]
+
+\newpage
+
+## Mom & Pop Sector Breakdown
+
+[Description: Sector distribution within single-site ("Mom & Pop") owners, showing business type diversity.]
+
+```{r mom-pop-sector-figure}
+#| label: fig-mom-pop-sector
+#| fig-cap: "Top 10 Sectors Among Single-Site Owners"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+include_figure("015_mom_pop_sector_breakdown")
+```
+
+[Figure Note: Identifies which business sectors dominate the single-site owner segment—critical for understanding small operator vulnerability to remediation costs.]
+
+\newpage
+
+## Major Chains Market Share
+
+[Description: Tank counts for major retail chains operating in Pennsylvania.]
+
+```{r major-chains-figure}
+#| label: fig-major-chains
+#| fig-cap: "Major Chains Market Share by Tank Count"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+include_figure("016_major_chains_market_share")
+```
+
+[Figure Note: Identifies dominant retail fuel chains (Sheetz, Wawa, GetGo, etc.) and their relative infrastructure footprints in Pennsylvania.]
+
+\newpage
+
+## Owner Size Evolution
+
+[Description: Temporal evolution of installation share by owner size class.]
+
+```{r owner-size-evolution-figure}
+#| label: fig-owner-size-evolution
+#| fig-cap: "Evolution of Tank Installations by Owner Size Class (5-Year Periods)"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+include_figure("017_owner_size_evolution")
+```
+
+[Figure Note: Stacked area showing market consolidation trends—increasing corporate share vs. declining single-site operator share over time.]
+
+\newpage
+
+## Business Category Evolution
+
+[Description: Temporal evolution of installation share by business category classification.]
+
+```{r business-category-evolution-figure}
+#| label: fig-business-category-evolution
+#| fig-cap: "Evolution of Tank Installations by Business Category (5-Year Periods)"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+include_figure("018_business_category_evolution")
+```
+
+[Figure Note: Shows structural shifts in who is installing tanks—retail gas, fleet operations, public sector, etc. Useful for understanding changing composition of USTIF portfolio.]
+
+\newpage
+
+# Closure Dynamics
+
+This section examines tank closure patterns over time, stratified by facility type.
+
+## Tank Closures by Facility Type Timeline
+
+[Description: Annual tank closures by business category, showing differential exit/modernization patterns.]
+
+```{r closures-by-type-figure}
+#| label: fig-closures-by-type
+#| fig-cap: "Tank Closures by Facility Type (1985-2025)"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+include_figure("019_tank_closures_by_facility_type_timeline")
+```
+
+[Figure Note: Stacked area chart showing closure volume by business category over time. Peaks may correspond to regulatory deadlines (e.g., 1998 EPA compliance), market consolidation waves, or economic shocks. Useful for understanding historical claim volume drivers.]
