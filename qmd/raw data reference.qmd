@@ -29,6 +29,8 @@ format:
         \usepackage{float}
         \usepackage{graphicx}
         \usepackage{adjustbox}
+        \usepackage{tabularx}
+        \usepackage{array}
   html:
     toc: true
     toc-depth: 2
@@ -68,38 +70,15 @@ find_table_file <- function(filename_base, extension = ".tex") {
   return(NULL)
 }
 
-# Helper function to include tables based on output format
 include_table <- function(filename_base) {
-  # For PDF: read and output LaTeX table content
   if (knitr::is_latex_output()) {
     tex_path <- find_table_file(filename_base, ".tex")
     if (!is.null(tex_path) && file.exists(tex_path)) {
-      # Read the table content
-      table_content <- readLines(tex_path)
-      
-      # Remove any float positioning - let Quarto handle it via chunk options
-      table_content <- gsub("\\\\begin\\{table\\}\\[.*?\\]", "\\\\begin{table}", table_content)
-      
-      # Wrap the tabular environment in resizebox to fit page width
-      full_text <- paste(table_content, collapse = "\n")
-      
-      # Use a more robust regex to find and wrap the tabular environment
-      full_text <- gsub(
-        "(\\\\begin\\{tabular\\}.*?\\\\end\\{tabular\\})",
-        "\\\\resizebox{\\\\textwidth}{!}{\\1}",
-        full_text,
-        perl = TRUE,
-        ignore.case = FALSE
-      )
-      
-      # Split back to lines
-      table_content <- strsplit(full_text, "\n")[[1]]
-      cat(table_content, sep = "\n")
+      cat(readLines(tex_path), sep = "\n")
     } else {
       cat("\\textbf{Error: Table file not found:}", filename_base, "\n")
     }
   } 
-  # For HTML: use HTML include
   else if (knitr::is_html_output()) {
     html_path <- find_table_file(filename_base, ".html")
     if (!is.null(html_path) && file.exists(html_path)) {
@@ -928,3 +907,320 @@ include_figure("019_tank_closures_by_facility_type_timeline")
 ```
 
 [Figure Note: Stacked area chart showing closure volume by business category over time. Peaks may correspond to regulatory deadlines (e.g., 1998 EPA compliance), market consolidation waves, or economic shocks. Useful for understanding historical claim volume drivers.]
+
+
+
+\newpage
+
+# USTIF Claims & Contracts Analysis
+
+This section provides a summary of the USTIF claims and remediation contracts, adjusted for inflation to **2024 Real Dollars**.
+
+## Claims Overview
+
+[Description: Operational status and financial severity of claims, adjusted for inflation.]
+```{r claims-status-table}
+#| label: tbl-claims-status
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("101_claims_status_summary")
+```
+
+[Table Note: Claims categorized by operational status with real dollar costs adjusted to 2024 base year.]
+
+\newpage
+
+## Financial Severity
+
+[Description: Distribution of real claim costs (log scale) showing the prevalence of high-severity events.]
+```{r claims-severity-figure}
+#| label: fig-claims-severity
+#| fig-cap: "Distribution of Real Claim Severities (2024 Dollars)"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+
+include_figure("105_claims_cost_distribution_real")
+```
+
+[Figure Note: Log-scale distribution reveals long right tail characteristic of environmental remediation costs.]
+
+\newpage
+
+## Contracts & Auctions
+
+[Description: Analysis of remediation contracts, comparing Bid-to-Result mechanisms against traditional models.]
+```{r contract-types-table}
+#| label: tbl-contract-types
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("106_contract_auction_types")
+```
+
+[Table Note: Contract mechanism breakdown showing PFP auction vs. T&M allocation patterns.]
+
+\newpage
+```{r contract-values-figure}
+#| label: fig-contract-values
+#| fig-cap: "Contract Value Distribution by Mechanism (Real 2024 Dollars)"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 5
+#| echo: false
+
+include_figure("108_contract_value_real_boxplot")
+```
+
+[Figure Note: Boxplot comparison of contract values by mechanism type. Caution: raw comparisons subject to selection bias per "naive fallacy" identified in research design.]
+
+\newpage
+
+# Appendix: Variable Inventory
+
+[Description: Complete frequency dictionary for categorical variables in the Claims and Contracts datasets.]
+
+## Claims Variables
+
+### Claim Status
+```{r var-claim-status-table}
+#| label: tbl-var-claim-status
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("110_var_claim_status")
+```
+
+[Table Note: Distribution of claim operational status (open/closed).]
+
+\newpage
+
+### DEP Region
+```{r var-dep-region-table}
+#| label: tbl-var-dep-region
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("110_var_dep_region")
+```
+
+[Table Note: Geographic distribution of claims across PA DEP regional offices.]
+
+\newpage
+
+### County
+```{r var-county-table}
+#| label: tbl-var-county
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("110_var_county")
+```
+
+[Table Note: County-level claim frequency distribution.]
+
+\newpage
+
+### Location Description
+```{r var-location-desc-table}
+#| label: tbl-var-location-desc
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("110_var_location_desc")
+```
+
+[Table Note: Facility location type classification.]
+
+\newpage
+
+### Products
+```{r var-products-table}
+#| label: tbl-var-products
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("110_var_products")
+```
+
+[Table Note: Substance/product types associated with claims.]
+
+\newpage
+
+### Is Closed
+```{r var-is-closed-table}
+#| label: tbl-var-is-closed
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("110_var_is_closed")
+```
+
+[Table Note: Binary indicator for claim closure status.]
+
+\newpage
+
+### Is Open
+```{r var-is-open-table}
+#| label: tbl-var-is-open
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("110_var_is_open")
+```
+
+[Table Note: Binary indicator for claim open status.]
+
+\newpage
+
+## Contracts Variables
+
+### Adjuster
+```{r var-adjuster-table}
+#| label: tbl-var-adjuster
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("111_var_adjuster")
+```
+
+[Table Note: ICF Claims Evaluator assignment distribution. Key variable for instrumental variable identification strategy.]
+
+\newpage
+
+### Consultant
+```{r var-consultant-table}
+#| label: tbl-var-consultant
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("111_var_consultant")
+```
+
+[Table Note: Environmental consulting firm assignment frequency.]
+
+\newpage
+
+### Brings to Closure
+```{r var-brings-to-closure-table}
+#| label: tbl-var-brings-to-closure
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("111_var_brings_to_closure")
+```
+
+[Table Note: Contract scope classification regarding site closure responsibility.]
+
+\newpage
+
+### Contract Category
+```{r var-contract-category-table}
+#| label: tbl-var-contract-category
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("111_var_contract_category")
+```
+
+[Table Note: High-level contract type categorization.]
+
+\newpage
+
+### Bid Type
+```{r var-bid-type-table}
+#| label: tbl-var-bid-type
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("111_var_bid_type")
+```
+
+[Table Note: Procurement mechanism classification (competitive bid vs. negotiated).]
+
+\newpage
+
+### Contract Type Raw
+```{r var-contract-type-raw-table}
+#| label: tbl-var-contract-type-raw
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("111_var_contract_type_raw")
+```
+
+[Table Note: Original contract type codes from source data.]
+
+\newpage
+
+### Auction Type
+```{r var-auction-type-table}
+#| label: tbl-var-auction-type
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("111_var_auction_type")
+```
+
+[Table Note: Auction mechanism subtype for PFP contracts.]
+
+\newpage
+
+### Is Bid to Result
+```{r var-is-bid-to-result-table}
+#| label: tbl-var-is-bid-to-result
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("111_var_is_bid_to_result")
+```
+
+[Table Note: Binary indicator for Performance-Fixed-Price (PFP) auction contracts. Primary treatment variable for causal analysis.]
+
+\newpage
+
+### Is Scope of Work
+```{r var-is-scope-of-work-table}
+#| label: tbl-var-is-scope-of-work
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("111_var_is_scope_of_work")
+```
+
+[Table Note: Binary indicator for traditional Time-and-Materials (T&M) contracts.]
+
+\newpage
+
+### Brings to Closure Flag
+```{r var-brings-to-closure-flag-table}
+#| label: tbl-var-brings-to-closure-flag
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("111_var_brings_to_closure_flag")
+```
+
+[Table Note: Binary indicator for contracts responsible for achieving site closure.]
+

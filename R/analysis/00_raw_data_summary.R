@@ -68,16 +68,23 @@ save_pub_table <- function(dt, filename_base, caption, col_names = NULL) {
   
   # HTML Fragment
   k_html <- kbl(dt, format = "html", caption = caption, col.names = col_names) %>%
-    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "left")
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                  full_width = FALSE, position = "left")
   writeLines(as.character(k_html), file.path(out_dir_tables, paste0(filename_base, ".html")))
   
-  # LaTeX Fragment
-  k_tex <- kbl(dt, format = "latex", caption = caption, booktabs = TRUE, col.names = col_names) %>%
-    kable_styling(latex_options = c("striped", "hold_position"))
+  # LaTeX Fragment - escape=FALSE for caption, TRUE for content
+  k_tex <- kbl(dt, format = "latex", 
+               caption = gsub("&", "\\\\&", caption),  # Manual escape for caption
+               booktabs = TRUE, 
+               col.names = col_names,
+               escape = TRUE) %>%  # Auto-escape table content
+    kable_styling(latex_options = c("scale_down"))
+  
   writeLines(as.character(k_tex), file.path(out_dir_tables, paste0(filename_base, ".tex")))
   
   message(sprintf("Table Saved: %s", filename_base))
 }
+
 
 save_pub_figure <- function(plot_obj, filename_base) {
   final_plot <- plot_obj + 
@@ -542,3 +549,160 @@ saveRDS(ds_stats, "data/processed/raw_data_descriptives.rds")
 message("\nProcessing Complete.")
 message(sprintf("Tables saved to: %s/", out_dir_tables))
 message(sprintf("Figures saved to: %s/", out_dir_figs))
+
+# ==============================================================================
+# 8. USTIF CLAIMS & CONTRACTS ANALYSIS (Inflation-Adjusted & Full Inventory)
+# ==============================================================================
+# Purpose: Analyze financials in REAL 2024 DOLLARS using live FRED CPI data.
+#          Generates full frequency dictionaries for all categorical variables.
+# Inputs:  data/processed/claims_clean.csv, data/processed/contracts_clean.csv
+# ==============================================================================
+
+message("\nStarting USTIF Claims & Contracts Analysis (Real Dollars via FRED)...")
+
+# 8.0 Live Inflation Data (FRED: CPI-U)
+# ------------------------------------------------------------------------------
+# We use quantmod to fetch CPIAUCNS (All Urban Consumers, Non-Seasonally Adj)
+if (!require("quantmod")) install.packages("quantmod")
+library(quantmod)
+
+message("Fetching live CPI data from FRED...")
+tryCatch({
+  getSymbols("CPIAUCNS", src = "FRED", auto.assign = TRUE)
+  cpi_data <- data.table(date = index(CPIAUCNS), cpi_value = as.numeric(CPIAUCNS))
+  
+  # Calculate Adjustment Factor (Base = Most Recent Month)
+  current_cpi <- tail(cpi_data$cpi_value, 1)
+  cpi_data[, Infl_Factor := current_cpi / cpi_value]
+  cpi_data[, Year := year(date)]
+  cpi_data[, Month := month(date)]
+  
+  message(sprintf("CPI Data Loaded: %d months. Base CPI: %.2f (Date: %s)", 
+                  nrow(cpi_data), current_cpi, tail(cpi_data$date, 1)))
+  
+}, error = function(e) {
+  stop("Failed to fetch data from FRED. Check internet connection or FRED API status.")
+})
+
+# 8.1 Load & Adjust Claims
+# ------------------------------------------------------------------------------
+path_claims    <- "data/processed/claims_clean.csv"
+path_contracts <- "data/processed/contracts_clean.csv"
+
+if(file.exists(path_claims)) {
+  claims <- fread(path_claims)
+  
+  # Standardize Dates
+  if("claim_date" %in% names(claims)) claims[, claim_date := as.Date(claim_date)]
+  
+  # Merge CPI by Year-Month of the Claim
+  claims[, `:=`(Year = year(claim_date), Month = month(claim_date))]
+  claims <- merge(claims, cpi_data[, .(Year, Month, Infl_Factor)], 
+                  by = c("Year", "Month"), all.x = TRUE)
+  
+  # Fallback for missing dates (use annual average or 1.0)
+  mean_factor <- mean(cpi_data$Infl_Factor, na.rm=TRUE)
+  claims[is.na(Infl_Factor), Infl_Factor := 1.0] 
+  
+  # Calculate Real Costs
+  claims[, `:=`(
+    paid_loss_real = paid_loss * Infl_Factor,
+    paid_alae_real = paid_alae * Infl_Factor,
+    total_paid_real = total_paid * Infl_Factor
+  )]
+  
+  # A. Operational Status (Real Dollars)
+  claim_status_freq <- claims[, .(
+    Count = .N,
+    Avg_Real_Cost = mean(total_paid_real, na.rm=TRUE),
+    Total_Real_Paid = sum(total_paid_real, na.rm = TRUE)
+  ), by = claim_status][order(-Count)]
+  
+  claim_status_freq[, `:=`(
+    Share = scales::percent(Count / sum(Count), accuracy = 0.1),
+    Avg_Real_Cost = scales::dollar(Avg_Real_Cost),
+    Total_Real_Paid = scales::dollar(Total_Real_Paid)
+  )]
+  save_pub_table(claim_status_freq, "101_claims_status_summary", "USTIF Claims: Status & Real Costs")
+  
+  # B. Real Cost Distribution (Log Scale)
+  p_severity <- ggplot(claims[total_paid_real > 1000], aes(x = total_paid_real)) +
+    geom_histogram(bins = 50, fill = "#27ae60", color = "white") +
+    scale_x_log10(labels = scales::dollar_format(scale = 1/1000, suffix = "k")) +
+    labs(x = "Total Paid (Real Dollars, Log Scale)", y = "Count",
+         title = "Distribution of Real Claim Severities (CPI Adjusted)")
+  save_pub_figure(p_severity, "105_claims_cost_distribution_real")
+}
+
+# 8.2 Load & Adjust Contracts
+# ------------------------------------------------------------------------------
+if(file.exists(path_contracts)) {
+  contracts <- fread(path_contracts)
+  
+  if("contract_start" %in% names(contracts)) contracts[, contract_start := as.Date(contract_start)]
+  
+  # Merge CPI by Year-Month
+  contracts[, `:=`(Year = year(contract_start), Month = month(contract_start))]
+  contracts <- merge(contracts, cpi_data[, .(Year, Month, Infl_Factor)], 
+                     by = c("Year", "Month"), all.x = TRUE)
+  contracts[is.na(Infl_Factor), Infl_Factor := 1.0]
+  
+  # Calculate Real Value
+  contracts[, val_real := total_contract_value * Infl_Factor]
+  
+  # A. Auction Type Summary (Real Dollars)
+  auc_summary <- contracts[, .(
+    Contracts = .N,
+    Total_Real_Value = sum(val_real, na.rm = TRUE),
+    Median_Real_Value = median(val_real, na.rm = TRUE)
+  ), by = auction_type][order(-Total_Real_Value)]
+  
+  auc_summary[, `:=`(
+    Total_Real_Value = scales::dollar(Total_Real_Value),
+    Median_Real_Value = scales::dollar(Median_Real_Value)
+  )]
+  save_pub_table(auc_summary, "106_contract_auction_types", "Contracts: Real Value by Mechanism")
+  
+  # B. Real Contract Value Boxplot
+  p_contr <- ggplot(contracts[val_real > 10000], aes(x = auction_type, y = val_real, fill = auction_type)) +
+    geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+    scale_y_log10(labels = scales::dollar) + coord_flip() +
+    scale_fill_viridis_d(option = "mako", begin = 0.3, end = 0.8) +
+    labs(x = NULL, y = "Contract Value (Real Dollars)", fill = "Mechanism")
+  save_pub_figure(p_contr, "108_contract_value_real_boxplot")
+}
+
+# 8.5 COMPLETE VARIABLE INVENTORY (Frequency Tables for ALL Variables)
+# ------------------------------------------------------------------------------
+message("\nGenerating Complete Variable Inventory Tables...")
+
+# Helper to loop through datasets
+generate_inventory <- function(dt, dataset_name, prefix) {
+  # Identify categorical-like columns (Character, Factor, Logical)
+  # Excluding obvious unique keys like 'claim_number' if they have high cardinality
+  cat_cols <- names(dt)[sapply(dt, function(x) is.character(x) | is.factor(x) | is.logical(x))]
+  
+  for(col in cat_cols) {
+    # Skip if too many unique values (likely IDs or free text)
+    if(uniqueN(dt[[col]]) > 100) next 
+    
+    # Calculate Frequency
+    freq_table <- dt[, .N, by = get(col)][order(-N)]
+    setnames(freq_table, "get", "Value")
+    
+    # Calculate Share
+    freq_table[, Share := scales::percent(N / sum(N), accuracy = 0.1)]
+    
+    # Save
+    safe_col_name <- janitor::make_clean_names(col)
+    filename <- paste0(prefix, "_var_", safe_col_name)
+    caption <- paste0("Variable Inventory: ", col, " (", dataset_name, ")")
+    
+    save_pub_table(freq_table, filename, caption)
+  }
+}
+
+if(exists("claims")) generate_inventory(claims, "Claims Data", "110")
+if(exists("contracts")) generate_inventory(contracts, "Contracts Data", "111")
+
+message("Variable Inventory Complete. Check output/tables/110_* and 111_*.")
