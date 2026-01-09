@@ -1,395 +1,426 @@
 # R/etl/01_load_ustif_data.R
 # ============================================================================
-# Pennsylvania UST Auction Analysis - ETL Step 1: Load USTIF Data
-# ============================================================================
-# Purpose: Import and clean proprietary USTIF Excel datasets
-# Input: Raw Excel files in data/raw/
-# Output: Cleaned .rds and .csv files in data/processed/
+# Pennsylvania UST Auction Analysis - ETL Step 1: Load USTIF Data (CSV, exact)
+# - Recreates variables & names from older Excel-based script
+# - Robust, NA-safe date parsing
+# - Head + str printed after each step for rapid debugging
+# - Produces data dictionary entries for both datasets
 # ============================================================================
 
 cat("\n========================================\n")
-cat("ETL Step 1: Loading USTIF Proprietary Data\n")
+cat("ETL Step 1: Loading USTIF Proprietary Data (CSV, exact-schema)\n")
 cat("========================================\n\n")
 
-# Load dependencies
-library(tidyverse)
-library(readxl)
-library(janitor)
-library(lubridate)
+suppressPackageStartupMessages({
+  library(data.table)
+  library(janitor)
+  library(lubridate)
+  library(stringr)
+  library(here)
+})
 
-# Load paths from master script (or define if running standalone)
-if (!exists("paths")) {
-  paths <- list(
-    raw = "data/raw",
-    processed = "data/processed"
-  )
+# -------------------------
+# Paths (data/raw or /mnt/data)
+# -------------------------
+paths <- list(
+  raw = here("data/raw"),
+  uploads = "/mnt/data",
+  processed = here("data/processed")
+)
+dir.create(paths$processed, recursive = TRUE, showWarnings = FALSE)
+
+find_raw_file <- function(fn) {
+  p1 <- file.path(paths$raw, fn)
+  p2 <- file.path(paths$uploads, fn)
+  if (file.exists(p1)) return(p1)
+  if (file.exists(p2)) return(p2)
+  return(NULL)
 }
 
-# Load data dictionary
-data_dict <- readRDS(file.path(paths$processed, "data_dictionary.rds"))
+# -------------------------
+# Helpers
+# -------------------------
+# Robust, NA-safe date parser
+parse_dates <- function(col) {
+  n <- length(col)
+  out <- rep(as.Date(NA), n)
 
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
+  # quick returns
+  if (inherits(col, "Date")) return(as.Date(col))
+  if (inherits(col, "POSIXt")) return(as.Date(col))
 
-# Add entries to data dictionary
-add_to_dictionary <- function(df, source_file, description_prefix = "") {
-  new_entries <- tibble(
-    variable_name = names(df),
-    description = paste(description_prefix, "Variable from", source_file),
+  # factors -> char
+  if (is.factor(col)) col <- as.character(col)
+
+  # build char vector safely
+  col_chr <- rep(NA_character_, n)
+  non_na <- !is.na(col)
+  if (any(non_na)) col_chr[non_na] <- trimws(as.character(col[non_na]))
+
+  # numeric detection (numeric or numeric-strings)
+  numeric_vals <- suppressWarnings(as.numeric(col_chr))
+  is_num <- !is.na(numeric_vals)
+
+  # numeric handling: epoch vs excel serial vs NA
+  if (any(is_num, na.rm = TRUE)) {
+    idx_num <- which(is_num)
+    for (i in idx_num) {
+      v <- numeric_vals[i]
+      if (is.na(v)) { out[i] <- as.Date(NA); next }
+      if (v > 1e9) {
+        out[i] <- as.Date(as.POSIXct(v, origin = "1970-01-01", tz = "UTC"))
+      } else if (v >= 20000 && v <= 60000) {
+        out[i] <- as.Date(v, origin = "1899-12-30")
+      } else if (v > 0 && v < 20000) {
+        out[i] <- as.Date(v, origin = "1899-12-30")
+      } else {
+        out[i] <- as.Date(NA)
+      }
+    }
+  }
+
+  # textual parsing (remaining non-empty)
+  text_idx <- which(is.na(out) & !is.na(col_chr) & col_chr != "")
+  if (length(text_idx) > 0) {
+    attempts <- c("mdy", "mdy HMS", "mdy HM", "dmy", "ymd", "ymd HMS", "BdY", "bdy", "Ymd")
+    parsed <- suppressWarnings(parse_date_time(col_chr[text_idx], orders = attempts, exact = FALSE, tz = "UTC"))
+    parsed_date <- as.Date(parsed)
+    ok <- !is.na(parsed_date)
+    if (any(ok)) out[text_idx[ok]] <- parsed_date[ok]
+  }
+
+  # final explicit formats fallback
+  still_na <- which(is.na(out) & !is.na(col_chr) & col_chr != "")
+  if (length(still_na) > 0) {
+    fmts <- c("%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d", "%Y/%m/%d",
+              "%d-%b-%Y", "%d-%B-%Y", "%b %d, %Y", "%B %d, %Y", "%Y%m%d")
+    for (fmt in fmts) {
+      if (length(still_na) == 0) break
+      try_parsed <- suppressWarnings(as.Date(col_chr[still_na], format = fmt))
+      ok2 <- !is.na(try_parsed)
+      if (any(ok2)) out[still_na[ok2]] <- try_parsed[ok2]
+      still_na <- which(is.na(out) & !is.na(col_chr) & col_chr != "")
+    }
+  }
+
+  return(as.Date(out))
+}
+
+# Quick print helper for debugging
+print_block <- function(dt, name, n = 6) {
+  cat("\n---", name, "---\n")
+  if (is.null(dt)) { cat("NULL\n"); return(invisible(NULL)) }
+  cat("Rows:", nrow(dt), "Cols:", ncol(dt), "\n")
+  if (is.data.table(dt) || is.data.frame(dt)) {
+    print(head(dt, n))
+    cat("\nStructure:\n")
+    print(str(dt))
+  } else {
+    print(dt)
+  }
+  invisible(NULL)
+}
+
+# Save helper
+save_dataset <- function(dt, name, path = paths$processed) {
+  if (nrow(dt) == 0) warning(sprintf("Dataset '%s' has 0 rows!", name))
+  saveRDS(dt, file.path(path, paste0(name, ".rds")))
+  fwrite(dt, file.path(path, paste0(name, ".csv")))
+  cat(sprintf("✓ Saved: %s/%s (.rds/.csv) — %d rows, %d cols\n", path, name, nrow(dt), ncol(dt)))
+  invisible(NULL)
+}
+
+# Data dictionary helper (returns data.table)
+add_to_dictionary <- function(dt, source_file) {
+  data.table(
+    variable_name = names(dt),
+    description = paste("Variable from", source_file),
     source_file = source_file,
-    data_type = sapply(df, function(x) class(x)[1]),
-    n_records = nrow(df),
-    n_missing = sapply(df, function(x) sum(is.na(x))),
-    unique_values = sapply(df, n_distinct),
-    notes = ""
+    data_type = sapply(dt, function(x) class(x)[1]),
+    n_records = nrow(dt),
+    n_missing = sapply(dt, function(x) sum(is.na(x))),
+    unique_values = sapply(dt, uniqueN),
+    notes = NA_character_
   )
-  return(new_entries)
 }
 
-# Save dataset as both RDS and CSV
-save_dataset <- function(df, name, path = paths$processed) {
-  saveRDS(df, file.path(path, paste0(name, ".rds")))
-  write_csv(df, file.path(path, paste0(name, ".csv")))
-  cat(paste0("✓ Saved: ", path, "/", name, ".rds\n"))
-  cat(paste0("✓ Saved: ", path, "/", name, ".csv\n\n"))
+# -------------------------
+# LOAD & PROCESS CLAIMS (exact columns)
+# -------------------------
+cat("\n--- Loading Individual Claims Data ---\n")
+claims_filename <- "Actuarial_UST_Individual_Claim_Data_thru_63020_4.csv"
+claims_file <- find_raw_file(claims_filename)
+if (is.null(claims_file)) stop("CRITICAL: Claims file not found at: ", claims_filename)
+
+claims_raw <- fread(claims_file, na.strings = c("", "NA", "N/A", "n/a"), encoding = "UTF-8", showProgress = FALSE)
+claims_raw <- clean_names(claims_raw)
+print_block(claims_raw, "claims_raw (post-read)")
+
+# exact columns expected (from the CSV you provided)
+expected_claim_cols <- c(
+  "event_department_abbreviation", "claim_number", "paid_loss", "paid_alae", "incurred_loss",
+  "date_of_loss_reported", "date_of_claim", "date_closed", "claim_status_as_of_6_10_2025",
+  "dep_region", "claimant_full_name", "county", "event_primary_loc_desc",
+  "product_s", "product_type_other_description"
+)
+missing_claim_cols <- setdiff(expected_claim_cols, names(claims_raw))
+if (length(missing_claim_cols) > 0) {
+  stop("CLAIMS SCHEMA ERROR. Missing: ", paste(missing_claim_cols, collapse = ", "))
 }
 
-# ============================================================================
-# DATASET 1: Actuarial Contract Data (Auction/Bid Records)
-# ============================================================================
+# Build claims with the original variable names and engineered fields
+claims <- claims_raw[, .(
+  # Keys & raw
+  department = trimws(as.character(event_department_abbreviation)),
+  claim_number = trimws(as.character(claim_number)),
 
-cat("Loading Actuarial Contract Data...\n")
+  # Financials
+  paid_loss = as.numeric(paid_loss),
+  paid_alae = as.numeric(paid_alae),
+  incurred_loss = as.numeric(incurred_loss),
 
-contracts_raw <- read_excel(
-  file.path(paths$raw, "Actuarial_Contract_Data_2.xlsx"),
-  sheet = "Report 1"
-) %>%
-  clean_names()
+  # Dates (raw -> will parse)
+  loss_reported_date_raw = date_of_loss_reported,
+  claim_date_raw = date_of_claim,
+  closed_date_raw = date_closed,
 
-cat(paste("  Raw records:", nrow(contracts_raw), "\n"))
-cat(paste("  Columns:", ncol(contracts_raw), "\n"))
+  # Claim characteristics
+  claim_status = as.character(claim_status_as_of_6_10_2025),
+  dep_region = trimws(as.character(dep_region)),
+  claimant_name = as.character(claimant_full_name),
+  county = str_to_title(trimws(as.character(county))),
+  location_desc = as.character(event_primary_loc_desc),
+  products = as.character(product_s),
+  product_other = as.character(product_type_other_description)
+)]
 
-# Data cleaning
-contracts <- contracts_raw %>%
-  rename(
-    claim_number = contract_jobs_claim_number,
-    contract_id = contract_job_identifier,
-    adjuster = adjuster_full_name,
-    site_name = cts_site_name,
-    department = department_name,
-    brings_to_closure = contract_will_bring_site_to_closure_desc,
-    consultant = consultant_full_name,
-    contract_start = contract_effective_date,
-    contract_end = contract_end_date,
-    contract_category = contract_category_desc,
-    bid_approval_date = bid_approval_letter_to_claimant,
-    bid_type = bid_type_desc,
-    contract_type = contract_type_desc,
-    base_price = contract_base_price,
-    amendments_total = total_price_of_amendments,
-    paid_to_date = amount_paid_to_date
-  ) %>%
-  mutate(
-    # Convert dates
-    contract_start = as.Date(contract_start),
-    contract_end = as.Date(contract_end),
-    bid_approval_date = as.Date(bid_approval_date),
-    
-    # Create contract year for temporal analysis
-    contract_year = year(contract_start),
-    
-    # Calculate total contract value
-    total_contract_value = coalesce(base_price, 0) + coalesce(amendments_total, 0),
-    
-    # Create bid type indicators
-    is_bid_to_result = str_detect(tolower(coalesce(bid_type, "")), "bid|result"),
-    is_scope_of_work = str_detect(tolower(coalesce(bid_type, "")), "scope|sow"),
-    
-    # Auction type categorization based on USTIF institutional knowledge
-    auction_type = case_when(
-      is_scope_of_work ~ "Scope of Work",
-      is_bid_to_result ~ "Bid-to-Result",
-      TRUE ~ "Other/Unknown"
-    ),
-    
-    # Create closure indicator
-    brings_to_closure_flag = str_detect(tolower(coalesce(brings_to_closure, "")), "yes|true|closure")
-  ) %>%
-  filter(!is.na(claim_number) & claim_number != "")
+print_block(claims, "claims (after projection, raw dates present)")
 
-cat(paste("  Cleaned records:", nrow(contracts), "\n"))
+# Parse dates robustly and drop raw date cols
+claims[, loss_reported_date := parse_dates(loss_reported_date_raw)]
+claims[, claim_date := parse_dates(claim_date_raw)]
+claims[, closed_date := parse_dates(closed_date_raw)]
+claims[, c("loss_reported_date_raw", "claim_date_raw", "closed_date_raw") := NULL]
 
-# Summary statistics
-cat("\n  Contract Summary:\n")
-cat(paste("    - Date range:", min(contracts$contract_start, na.rm = TRUE), "to", 
-          max(contracts$contract_start, na.rm = TRUE), "\n"))
-cat(paste("    - Unique claims:", n_distinct(contracts$claim_number), "\n"))
-cat(paste("    - Bid types:\n"))
-print(table(contracts$auction_type, useNA = "ifany"))
+print_block(claims, "claims (dates parsed)")
 
-# Update data dictionary
-data_dict <- bind_rows(data_dict, add_to_dictionary(contracts, "Actuarial_Contract_Data_2.xlsx"))
+# Feature Engineering (match old script exactly)
+claims[, `:=`(
+  claim_year = year(claim_date),
+  loss_year = year(loss_reported_date),
+  closed_year = year(closed_date),
 
-# Save cleaned data
-save_dataset(contracts, "contracts_clean")
+  total_paid = fcoalesce(paid_loss, 0) + fcoalesce(paid_alae, 0),
 
-# # ============================================================================
-# # DATASET 2: Tank Construction/Closure Data
-# # ============================================================================
+  is_closed = !is.na(closed_date) | str_detect(tolower(coalesce(claim_status, "")), "closed"),
+  is_open = str_detect(tolower(coalesce(claim_status, "")), "open"),
 
-# cat("Loading Tank Construction Data...\n")
+  claim_duration_days = as.numeric(difftime(closed_date, claim_date, units = "days")),
+  claim_duration_years = as.numeric(difftime(closed_date, claim_date, units = "days")) / 365.25
+)]
 
-# tanks_raw <- read_excel(
-#   file.path(paths$raw, "Tank_Construction_Closed.xlsx"),
-#   sheet = "data"
-# ) %>%
-#   clean_names()
+print_block(claims, "claims (feature engineered)")
 
-# cat(paste("  Raw records:", nrow(tanks_raw), "\n"))
-# cat(paste("  Columns:", ncol(tanks_raw), "\n"))
+# Remove garbage rows and deduplicate
+initial_n_claims <- nrow(claims)
+claims <- claims[!is.na(claim_number) & claim_number != ""]
+claims <- claims[!str_detect(tolower(coalesce(claim_number, "")), "^sum")]
+claims <- claims[!is.na(department) & department != ""]
+if (nrow(claims) < initial_n_claims) {
+  cat(sprintf("  Removed %d garbage/summary rows from claims\n", initial_n_claims - nrow(claims)))
+}
+claims <- unique(claims, by = "claim_number")
+print_block(claims, "claims (cleaned & deduped)")
 
-# # Data cleaning
-# tanks <- tanks_raw %>%
-#   rename(
-#     facility_id = pf_other_id,
-#     facility_name = facility_name,
-#     client_id = client_id,
-#     client_name = client_search_name,
-#     region = region_code,
-#     tank_type = ast_ust,
-#     tank_seq = seq_number,
-#     capacity_gallons = capacity,
-#     install_date = date_installed,
-#     substance = substance_stored_desc,
-#     component_code = sys_comp,
-#     component_desc = sys_comp_desc,
-#     construction_desc = comp_desc,
-#     construction_comment = comp_desc_comment,
-#     construction_detail = comp_desc_description,
-#     permit_status = tank_permit_status_code,
-#     tank_status = tank_status_code
-#   ) %>%
-#   mutate(
-#     # Convert dates
-#     install_date = as.Date(install_date),
-    
-#     # Calculate tank age (as of current date)
-#     tank_age_years = as.numeric(difftime(Sys.Date(), install_date, units = "days")) / 365.25,
-    
-#     # Installation year for cohort analysis
-#     install_year = year(install_date),
-    
-#     # Create tank construction indicators
-#     is_single_wall = str_detect(tolower(coalesce(construction_desc, "")), "single|bare|steel") &
-#                      !str_detect(tolower(coalesce(construction_desc, "")), "double"),
-#     is_double_wall = str_detect(tolower(coalesce(construction_desc, "")), "double|secondary"),
-#     is_fiberglass = str_detect(tolower(coalesce(construction_desc, "")), "fiberglass|frp|composite"),
-    
-#     # Tank type categorization
-#     wall_type = case_when(
-#       is_double_wall ~ "Double-Wall",
-#       is_single_wall ~ "Single-Wall",
-#       TRUE ~ "Unknown/Other"
-#     ),
-    
-#     # Tank status interpretation
-#     status_desc = case_when(
-#       tank_status == "W" ~ "Withdrawn",
-#       tank_status == "UR" ~ "Under Review",
-#       tank_status == "A" ~ "Active",
-#       tank_status == "C" ~ "Closed",
-#       TRUE ~ as.character(tank_status)
-#     ),
-    
-#     # Underground vs aboveground
-#     is_underground = (tank_type == "UST")
-#   ) %>%
-#   filter(!is.na(facility_id) & facility_id != "")
-
-# cat(paste("  Cleaned records:", nrow(tanks), "\n"))
-
-# # Summary statistics
-# cat("\n  Tank Summary:\n")
-# cat(paste("    - Unique facilities:", n_distinct(tanks$facility_id), "\n"))
-# cat(paste("    - Install date range:", min(tanks$install_date, na.rm = TRUE), "to",
-#           max(tanks$install_date, na.rm = TRUE), "\n"))
-# cat(paste("    - Mean tank age:", round(mean(tanks$tank_age_years, na.rm = TRUE), 1), "years\n"))
-# cat(paste("    - Wall types:\n"))
-# print(table(tanks$wall_type, useNA = "ifany"))
-# cat(paste("    - Tank status:\n"))
-# print(table(tanks$status_desc, useNA = "ifany"))
-
-# # Update data dictionary
-# data_dict <- bind_rows(data_dict, add_to_dictionary(tanks, "Tank_Construction_Closed.xlsx"))
-
-# # Save cleaned data
-# save_dataset(tanks, "tanks_clean")
-
-# ============================================================================
-# DATASET 3: Individual Claims Data
-# ============================================================================
-
-cat("Loading Individual Claims Data...\n")
-
-claims_raw <- read_excel(
-  file.path(paths$raw, "Actuarial_UST_Individual_Claim_Data_thru_63020_4.xlsx"),
-  sheet = "Report 1",
-  skip = 3  # Header is on row 4
-) %>%
-  clean_names()
-
-cat(paste("  Raw records:", nrow(claims_raw), "\n"))
-cat(paste("  Columns:", ncol(claims_raw), "\n"))
-
-# Data cleaning
-claims <- claims_raw %>%
-  select(-starts_with("unnamed")) %>%
-  rename(
-    department = event_department_abbreviation,
-    loss_reported_date = date_of_loss_reported,
-    claim_date = date_of_claim,
-    claim_status = claim_status_as_of_6_10_2025,
-    closed_date = date_closed,
-    claimant_name = claimant_full_name,
-    location_desc = event_primary_loc_desc,
-    products = product_s,
-    product_other = product_type_other_description
-  ) %>%
-  mutate(
-    # Convert dates
-    loss_reported_date = as.Date(loss_reported_date),
-    claim_date = as.Date(claim_date),
-    closed_date = as.Date(closed_date),
-    
-    # Extract year for temporal analysis
-    claim_year = year(claim_date),
-    loss_year = year(loss_reported_date),
-    closed_year = year(closed_date),
-    
-    # Calculate total paid (loss + ALAE)
-    total_paid = coalesce(paid_loss, 0) + coalesce(paid_alae, 0),
-    
-    # Claim status indicators
-    is_closed = !is.na(closed_date) | str_detect(tolower(coalesce(claim_status, "")), "closed"),
-    is_open = str_detect(tolower(coalesce(claim_status, "")), "open"),
-    
-    # Duration metrics (if closed)
-    claim_duration_days = as.numeric(difftime(closed_date, claim_date, units = "days")),
-    claim_duration_years = claim_duration_days / 365.25,
-    
-    # Clean county names
-    county = str_to_title(str_trim(county)),
-    
-    # Clean DEP region
-    dep_region = str_trim(dep_region)
-  ) %>%
-  filter(!is.na(claim_number) & claim_number != "") %>%
-  distinct(claim_number, .keep_all = TRUE)
-
-cat(paste("  Cleaned records:", nrow(claims), "\n"))
-
-# Summary statistics
+# Summary statistics (same as old script)
 cat("\n  Claims Summary:\n")
-cat(paste("    - Unique claims:", n_distinct(claims$claim_number), "\n"))
-cat(paste("    - Claim date range:", min(claims$claim_date, na.rm = TRUE), "to",
-          max(claims$claim_date, na.rm = TRUE), "\n"))
-cat(paste("    - Total paid (all claims): $", format(sum(claims$total_paid, na.rm = TRUE), big.mark = ","), "\n"))
-cat(paste("    - Median paid per claim: $", format(median(claims$total_paid, na.rm = TRUE), big.mark = ","), "\n"))
-cat(paste("    - Mean paid per claim: $", format(mean(claims$total_paid, na.rm = TRUE), big.mark = ","), "\n"))
-cat(paste("    - Claim status:\n"))
-cat(paste("        Closed:", sum(claims$is_closed, na.rm = TRUE), "\n"))
-cat(paste("        Open:", sum(claims$is_open, na.rm = TRUE), "\n"))
-cat(paste("    - Claims by DEP Region:\n"))
-print(table(claims$dep_region, useNA = "ifany"))
+cat(sprintf("    - Unique claims: %d\n", uniqueN(claims$claim_number)))
+if ("claim_date" %in% names(claims) && any(!is.na(claims$claim_date))) {
+  cat(sprintf("    - Date range: %s to %s\n", min(claims$claim_date, na.rm = TRUE), max(claims$claim_date, na.rm = TRUE)))
+}
+cat(sprintf("    - Total paid (all claims): $%s\n", format(sum(claims$total_paid, na.rm = TRUE), big.mark = ",")))
+cat(sprintf("    - Median paid per claim: $%s\n", format(median(claims$total_paid, na.rm = TRUE), big.mark = ",")))
+cat(sprintf("    - Closed claims: %d (%.1f%%)\n", sum(claims$is_closed, na.rm = TRUE), 100 * mean(claims$is_closed, na.rm = TRUE)))
 
-# Update data dictionary
-data_dict <- bind_rows(data_dict, add_to_dictionary(claims, "Actuarial_UST_Individual_Claim_Data_thru_63020_4.xlsx"))
+# Schema validation (hard)
+required_claims_cols <- c("department", "claim_number", "total_paid", "claim_date", "is_closed", "claim_duration_years", "county", "dep_region")
+missing_cols <- setdiff(required_claims_cols, names(claims))
+if (length(missing_cols) > 0) {
+  stop("SCHEMA ERROR: Missing required columns in claims: ", paste(missing_cols, collapse = ", "))
+}
 
-# Save cleaned data
 save_dataset(claims, "claims_clean")
 
-# ============================================================================
-# DATASET 4: Institutional Knowledge (Text Data)
-# ============================================================================
+# -------------------------
+# LOAD & PROCESS CONTRACTS (exact columns)
+# -------------------------
+cat("\n--- Loading Actuarial Contract Data ---\n")
+contracts_filename <- "Actuarial_Contract_Data_2.csv"
+contracts_file <- find_raw_file(contracts_filename)
+if (is.null(contracts_file)) {
+  warning("Contracts file not found. Skipping contract processing.")
+} else {
+  contracts_raw <- fread(contracts_file, na.strings = c("", "NA", "N/A", "n/a"), encoding = "UTF-8", showProgress = FALSE)
+  contracts_raw <- clean_names(contracts_raw)
+  print_block(contracts_raw, "contracts_raw (post-read)")
 
-cat("Processing Institutional Documentation...\n")
-
-# Read and parse the Q&A document
-qa_text <- readLines(file.path(paths$raw, "USTIF_Auction_Q_A.txt"), warn = FALSE)
-
-# Extract key institutional facts
-institutional_knowledge <- list(
-  source_file = "USTIF_Auction_Q_A.txt",
-  date_processed = Sys.Date(),
-  
-  # Auction formats
-  auction_formats = c(
-    "Scope of Work (SOW)" = "Detailed specifications; cost heavily weighted in scoring",
-    "Bid-to-Result" = "Outcome-based; technical proposal emphasized in scoring"
-  ),
-  
-  # Scoring mechanism
-  scoring_rules = list(
-    cost_scoring = "Lowest bid receives maximum cost points",
-    viability_threshold = "70% of max cost score qualifies bid as viable",
-    technical_vs_cost = "SOW weights cost; Bid-to-Result weights technical"
-  ),
-  
-  # Administrative process
-  administrative_evaluation = list(
-    purpose = "Rule compliance check",
-    cost_changes = "Not permitted after submission",
-    late_bids = "Disqualified"
-  ),
-  
-  # Site selection
-  site_selection = list(
-    decision_maker = "USTIF decides which sites go to auction",
-    criteria = "Existing claims with delays or cost estimate concerns",
-    note = "Stuff not getting done or cost estimates too high"
-  ),
-  
-  # Historical notes
-  history = list(
-    pre_2009 = "Manual process; required signup for bid list",
-    post_2009 = "Automated notification system"
+  # Expect exact cleaned column names (as in your CSV)
+  expected_contract_cols <- c(
+    "contract_jobs_claim_number", "contract_job_identifier", "adjuster_full_name",
+    "cts_site_name", "department_name", "contract_will_bring_site_to_closure_desc",
+    "consultant_full_name", "contract_effective_date", "contract_end_date",
+    "contract_category_desc", "bid_approval_letter_to_claimant", "bid_type_desc",
+    "contract_type_desc", "contract_base_price", "total_price_of_amendments",
+    "amount_paid_to_date", "notes"
   )
-)
+  missing_contract_cols <- setdiff(expected_contract_cols, names(contracts_raw))
+  if (length(missing_contract_cols) > 0) {
+    stop("CONTRACTS SCHEMA ERROR. Missing: ", paste(missing_contract_cols, collapse = ", "))
+  }
 
-# Save institutional knowledge
-saveRDS(institutional_knowledge, file.path(paths$processed, "institutional_knowledge.rds"))
+  # Clean & Transform (original variable names + engineered)
+  contracts <- contracts_raw[, .(
+    # Keys
+    claim_number = trimws(as.character(contract_jobs_claim_number)),
+    contract_id = trimws(as.character(contract_job_identifier)),
 
-# Also save as markdown for human reference
-cat(qa_text, file = "docs/USTIF_auction_design.md", sep = "\n")
+    # Administrative
+    adjuster = trimws(as.character(adjuster_full_name)),
+    site_name = as.character(cts_site_name),
+    department = trimws(as.character(department_name)),
+    consultant = as.character(consultant_full_name),
 
-cat("✓ Saved: data/processed/institutional_knowledge.rds\n")
-cat("✓ Saved: docs/USTIF_auction_design.md\n\n")
+    # Contract characteristics
+    brings_to_closure = as.character(contract_will_bring_site_to_closure_desc),
+    contract_category = as.character(contract_category_desc),
+    bid_type = as.character(bid_type_desc),
+    contract_type_raw = as.character(contract_type_desc),
 
-# ============================================================================
-# SAVE UPDATED DATA DICTIONARY
-# ============================================================================
+    # Dates raw (parse after)
+    contract_start_raw = contract_effective_date,
+    contract_end_raw = contract_end_date,
+    bid_approval_date_raw = bid_approval_letter_to_claimant,
 
-saveRDS(data_dict, file.path(paths$processed, "data_dictionary.rds"))
-write_csv(data_dict, file.path(paths$processed, "data_dictionary.csv"))
+    # Financials
+    base_price = as.numeric(contract_base_price),
+    amendments_total = as.numeric(total_price_of_amendments),
+    paid_to_date = as.numeric(amount_paid_to_date),
 
+    # Notes
+    notes = as.character(notes)
+  )]
+
+  print_block(contracts, "contracts (after projection, raw dates present)")
+
+  # Parse contract dates
+  contracts[, contract_start := parse_dates(contract_start_raw)]
+  contracts[, contract_end := parse_dates(contract_end_raw)]
+  contracts[, bid_approval_date := parse_dates(bid_approval_date_raw)]
+  contracts[, c("contract_start_raw", "contract_end_raw", "bid_approval_date_raw") := NULL]
+
+  # Feature engineering (match old script)
+  contracts[, `:=`(
+    contract_year = year(contract_start),
+    total_contract_value = fcoalesce(base_price, 0) + fcoalesce(amendments_total, 0),
+
+    auction_type = fcase(
+      str_detect(tolower(coalesce(bid_type, "")), "result") |
+        str_detect(tolower(coalesce(contract_type_raw, "")), "performance"), "Bid-to-Result",
+      str_detect(tolower(coalesce(bid_type, "")), "scope|sow|defined"), "Scope of Work",
+      default = "Other/Unknown"
+    ),
+
+    is_bid_to_result = str_detect(tolower(coalesce(bid_type, "")), "result") |
+      str_detect(tolower(coalesce(contract_type_raw, "")), "performance"),
+
+    is_scope_of_work = str_detect(tolower(coalesce(bid_type, "")), "scope|sow|defined"),
+    brings_to_closure_flag = str_detect(tolower(coalesce(brings_to_closure, "")), "yes|true")
+  )]
+
+  # Clean up & dedupe
+  initial_n_contracts <- nrow(contracts)
+  contracts <- contracts[!is.na(claim_number) & claim_number != ""]
+  if (nrow(contracts) < initial_n_contracts) {
+    cat(sprintf("  Removed %d rows with missing claim_number\n", initial_n_contracts - nrow(contracts)))
+  }
+  contracts <- unique(contracts, by = c("claim_number", "contract_id"))
+  print_block(contracts, "contracts (cleaned & deduped)")
+
+  # Summary (same style as old script)
+  cat("\n  Contracts Summary:\n")
+  cat(sprintf("    - Unique claims: %d\n", uniqueN(contracts$claim_number)))
+  cat(sprintf("    - Unique adjusters: %d\n", uniqueN(contracts$adjuster)))
+  if ("contract_start" %in% names(contracts) && any(!is.na(contracts$contract_start))) {
+    cat(sprintf("    - Date range: %s to %s\n", min(contracts$contract_start, na.rm = TRUE), max(contracts$contract_start, na.rm = TRUE)))
+  }
+  cat("    - Auction types:\n")
+  print(table(contracts$auction_type, useNA = "ifany"))
+
+  # Schema validation (hard)
+  required_contracts_cols <- c("claim_number", "contract_id", "adjuster", "auction_type", "contract_start", "total_contract_value", "is_bid_to_result")
+  missing_cols <- setdiff(required_contracts_cols, names(contracts))
+  if (length(missing_cols) > 0) {
+    stop("SCHEMA ERROR: Missing required columns in contracts: ", paste(missing_cols, collapse = ", "))
+  }
+
+  save_dataset(contracts, "contracts_clean")
+}
+
+# -------------------------
+# DATA DICTIONARY UPDATE (match original layout & variable names)
+# -------------------------
+cat("\n--- Updating Data Dictionary ---\n")
+dict_path <- file.path(paths$processed, "data_dictionary.rds")
+
+if (file.exists(dict_path)) {
+  data_dict <- readRDS(dict_path)
+} else {
+  data_dict <- data.table(
+    variable_name = character(),
+    description = character(),
+    source_file = character(),
+    data_type = character(),
+    n_records = integer(),
+    n_missing = integer(),
+    unique_values = integer(),
+    notes = character()
+  )
+}
+
+# Add claims
+data_dict <- rbindlist(list(
+  data_dict,
+  add_to_dictionary(claims, claims_filename)
+), fill = TRUE)
+
+# Add contracts if present
+if (exists("contracts")) {
+  data_dict <- rbindlist(list(
+    data_dict,
+    add_to_dictionary(contracts, contracts_filename)
+  ), fill = TRUE)
+}
+
+# Deduplicate dictionary and save
+data_dict <- unique(data_dict, by = c("variable_name", "source_file"))
+saveRDS(data_dict, dict_path)
+fwrite(data_dict, file.path(paths$processed, "data_dictionary.csv"))
 cat("✓ Updated: data/processed/data_dictionary.rds\n")
 cat("✓ Updated: data/processed/data_dictionary.csv\n\n")
 
-# ============================================================================
+# -------------------------
 # SUMMARY
-# ============================================================================
-
+# -------------------------
 cat("========================================\n")
 cat("ETL STEP 1 COMPLETE\n")
 cat("========================================\n")
 cat("\nDatasets created:\n")
-cat(paste("  1. contracts_clean (.rds/.csv):", nrow(contracts), "records\n"))
-cat(paste("  2. tanks_clean (.rds/.csv):", nrow(tanks), "records\n"))
-cat(paste("  3. claims_clean (.rds/.csv):", nrow(claims), "records\n"))
-cat("  4. institutional_knowledge.rds\n")
-cat("\n")
-cat("NEXT STEPS:\n")
-cat("  • (Optional) Run: source('R/etl/02_padep_acquisition.R')\n")
+cat(sprintf("  1. claims_clean (.rds/.csv): %d records\n", nrow(claims)))
+if (exists("contracts")) cat(sprintf("  2. contracts_clean (.rds/.csv): %d records\n", nrow(contracts)))
+cat("\nStable Keys:\n")
+cat("  - claims: claim_number, department\n")
+cat("  - contracts: claim_number, contract_id, adjuster\n")
+cat("\nNEXT STEPS:\n")
+cat("  • Run: source('R/etl/02_build_master_tank_list.R')\n")
 cat("  • Run: source('R/etl/03_merge_master_dataset.R')\n")
 cat("========================================\n\n")
