@@ -1,0 +1,657 @@
+---
+title: "Data Dictionary & Variable Construction Reference"
+subtitle: "Repo A: PA UST Combined Datasets"
+author:
+  - name: "Analytical Engine"
+    affiliation: "Project Team"
+date: last-modified
+date-format: "MMMM D, YYYY"
+abstract: |
+  This document serves as the definitive technical reference for the raw datasets in Repo A (Facility/Tank Master Database). It characterizes the distributions of key variables—including tank status, substance types, and component attributes—and identifies specific data quality issues such as default installation dates. The frequency tables presented herein are intended to guide the "hotcoding" of binary variables and the treatment of missing data for downstream econometric analysis.
+format:
+  pdf:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    fontsize: 11pt
+    geometry:
+      - top=1in
+      - bottom=1in
+      - left=1in
+      - right=1in
+    keep-tex: false
+    link-citations: true
+    colorlinks: true
+    include-in-header:
+      text: |
+        \usepackage{xcolor}
+        \usepackage{colortbl}
+        \usepackage{float}
+        \usepackage{graphicx}
+        \usepackage{adjustbox}
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    theme: cosmo
+    code-fold: true
+---
+
+```{r setup}
+#| echo: false
+#| warning: false
+#| message: false
+
+library(knitr)
+library(stringr)
+
+# --- CONFIGURATION ---
+# Adjust this path if your QMD is in a different folder than 'output/tables'
+table_dir <- "../output/tables" 
+figure_dir <- "../output/figures"
+
+# Helper function to find table file (handles truncated filenames)
+find_table_file <- function(filename_base, extension = ".tex") {
+  # First try exact match
+  exact_path <- file.path(table_dir, paste0(filename_base, extension))
+  if (file.exists(exact_path)) {
+    return(exact_path)
+  }
+  # Try to find files that start with the base name (handles truncation with dots)
+  # Escape special regex characters in filename_base
+  pattern <- paste0("^", gsub("([.^$+?(){}[\\|])", "\\\\\\1", filename_base, perl = TRUE))
+  # Look for files starting with pattern and ending with extension (may have dots in between)
+  all_files <- list.files(table_dir, pattern = paste0(pattern, ".*", extension, "$"), full.names = TRUE)
+  if (length(all_files) > 0) {
+    return(all_files[1])  # Return first match
+  }
+  return(NULL)
+}
+
+# Helper function to include tables based on output format
+include_table <- function(filename_base) {
+  # For PDF: read and output LaTeX table content
+  if (knitr::is_latex_output()) {
+    tex_path <- find_table_file(filename_base, ".tex")
+    if (!is.null(tex_path) && file.exists(tex_path)) {
+      # Read the table content
+      table_content <- readLines(tex_path)
+      
+      # Remove any float positioning - let Quarto handle it via chunk options
+      table_content <- gsub("\\\\begin\\{table\\}\\[.*?\\]", "\\\\begin{table}", table_content)
+      
+      # Wrap the tabular environment in resizebox to fit page width
+      full_text <- paste(table_content, collapse = "\n")
+      
+      # Use a more robust regex to find and wrap the tabular environment
+      full_text <- gsub(
+        "(\\\\begin\\{tabular\\}.*?\\\\end\\{tabular\\})",
+        "\\\\resizebox{\\\\textwidth}{!}{\\1}",
+        full_text,
+        perl = TRUE,
+        ignore.case = FALSE
+      )
+      
+      # Split back to lines
+      table_content <- strsplit(full_text, "\n")[[1]]
+      cat(table_content, sep = "\n")
+    } else {
+      cat("\\textbf{Error: Table file not found:}", filename_base, "\n")
+    }
+  } 
+  # For HTML: use HTML include
+  else if (knitr::is_html_output()) {
+    html_path <- find_table_file(filename_base, ".html")
+    if (!is.null(html_path) && file.exists(html_path)) {
+      cat(readLines(html_path), sep = "\n")
+    } else {
+      cat("**Error: Table file not found:**", filename_base, "\n")
+    }
+  }
+}
+
+# Helper function to include figures
+include_figure <- function(filename_base) {
+  fig_path <- file.path(figure_dir, paste0(filename_base, ".png"))
+  if (file.exists(fig_path)) {
+    # Use knitr::include_graphics for proper Quarto integration
+    # The chunk options will handle sizing via fig-width
+    knitr::include_graphics(fig_path)
+  } else {
+    if (knitr::is_latex_output()) {
+      cat("\\textbf{Error: Figure file not found:}", fig_path, "\n")
+    } else {
+      cat("**Error: Figure file not found:**", fig_path, "\n")
+    }
+  }
+}
+```
+
+\newpage
+
+# Facility & Tank Characteristics
+
+This section details the primary grouping variables derived from the harmonized Active (PADEP) and Inactive (SSRS) datasets.
+
+## Tank Status
+
+[Description: Explanation of how Active vs. Inactive status is defined.]
+
+
+
+```{r tank-status-table}
+#| label: tbl-tank-status
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+
+include_table("001_tank_status_freq")
+```
+
+[Table Note: Verify if 'Temporarily Out of Use' tanks should be treated as active for auction eligibility.]
+
+\newpage
+## Substance Profile
+
+[Description: Breakdown of fuel types stored in the tanks, mapped from raw substance codes to boolean flags.]
+
+
+
+```{r substance-profile-table}
+#| label: tbl-substance-profile
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("002_substance_counts")
+```
+
+[Table Note: These counts are based on the mapping of raw substance codes (e.g., "GAS", "DIESL") to consolidated categories.]
+
+\newpage
+## Installation Date Diagnostics
+
+[Description: Assessment of data quality for DATE_INSTALLED.]
+
+
+
+```{r date-diagnostics-table}
+#| label: tbl-date-diagnostics
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("003_date_defaults")
+```
+
+[Table Note: The dates listed above are likely system defaults (e.g., 01/01/1900) and should be treated as missing values.]
+
+\newpage
+# Component Universe
+
+This section details the raw attributes available in the 'Compounds' table. Use these tables to determine which specific attributes to 'hotcode' into binary variables.
+
+
+
+## Tank Specifics
+
+### Release Detection
+
+```{r tank-release-detection-table}
+#| label: tbl-tank-release-detection
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_tank_release_detection_method")
+```
+
+[Table Note: Identify primary detection methods.]
+
+\newpage
+
+### Tank Construction
+
+```{r tank-construction-table}
+#| label: tbl-tank-construction
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_tank_construction")
+```
+
+[Table Note: Distinguish between Steel, Fiberglass, and Composite.]
+
+\newpage
+
+## Piping Infrastructure
+
+### Underground Piping Construction
+
+```{r ug-piping-construction-table}
+#| label: tbl-ug-piping-construction
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_ug_piping_construction")
+```
+
+[Table Note: Key variable for leak risk (e.g., Single Wall vs Double Wall, Galvanized vs Fiberglass).]
+
+\newpage
+
+### Underground Piping: Single Inner Wall
+
+```{r ug-single-inner-wall-table}
+#| label: tbl-ug-single-inner-wall
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_ug_single_inner_wall_piping")
+```
+
+[Table Note: [Placeholder: Description of single inner wall piping characteristics.]]
+
+\newpage
+
+### Underground Piping: Outer Wall
+
+```{r ug-outer-wall-table}
+#| label: tbl-ug-outer-wall
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_ug_outer_wall_piping")
+```
+
+[Table Note: [Placeholder: Description of outer wall piping characteristics.]]
+
+\newpage
+
+### Aboveground Piping: Corrosion Protection
+
+```{r ag-piping-corrosion-table}
+#| label: tbl-ag-piping-corrosion
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_ag_piping_construction_corrosion_prot")
+```
+
+[Table Note: [Placeholder: Description of aboveground piping corrosion protection methods.]]
+
+\newpage
+
+### Piping Release Detection
+
+```{r pipe-release-detection-table}
+#| label: tbl-pipe-release-detection
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_pipe_release_detection_method")
+```
+
+[Table Note: [Placeholder: Description of piping release detection methods.]]
+
+\newpage
+
+### Line Leak Detectors
+
+```{r line-leak-detector-table}
+#| label: tbl-line-leak-detector
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_line_leak_detector_shuts_off_pump")
+```
+
+[Table Note: [Placeholder: Description of line leak detector functionality.]]
+
+\newpage
+
+### Secondary Containment
+
+```{r secondary-containment-table}
+#| label: tbl-secondary-containment
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_ust_total_secondarily_contained")
+```
+
+[Table Note: [Placeholder: Description of secondary containment systems.]]
+
+# Regulatory & Compliance
+
+\newpage
+
+## Certificates & Permits
+
+```{r registration-certificate-table}
+#| label: tbl-registration-certificate
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_registration_certificate")
+```
+
+[Table Note: [Placeholder: Description of registration certificate requirements.]]
+
+```{r fire-marshal-permit-table}
+#| label: tbl-fire-marshal-permit
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_fire_marshal_permit")
+```
+
+[Table Note: [Placeholder: Description of fire marshal permit requirements.]]
+
+\newpage
+
+## Prevention Systems (Spill & Overfill)
+
+```{r spill-prevention-table}
+#| label: tbl-spill-prevention
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_spill_prevention")
+```
+
+[Table Note: [Placeholder: Description of spill prevention systems.]]
+
+```{r overfill-prevention-table}
+#| label: tbl-overfill-prevention
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_overfill_prevention")
+```
+
+[Table Note: Presence of these systems often correlates with lower premiums.]
+
+\newpage
+
+## Vapor Recovery Systems
+
+```{r vapor-recovery-table}
+#| label: tbl-vapor-recovery
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_vapor_recovery")
+```
+
+[Table Note: [Placeholder: Description of vapor recovery systems.]]
+
+```{r stage-i-vapor-recovery-table}
+#| label: tbl-stage-i-vapor-recovery
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_stage_i_vapor_recovery")
+```
+
+[Table Note: [Placeholder: Description of Stage I vapor recovery.]]
+
+```{r stage-ii-vapor-recovery-table}
+#| label: tbl-stage-ii-vapor-recovery
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_stage_ii_vapor_recovery")
+```
+
+[Table Note: Stage II recovery is largely phased out; check if this indicates older infrastructure.]
+
+\newpage
+
+## Containment & Sumps
+
+```{r tank-top-containment-table}
+#| label: tbl-tank-top-containment
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_tank_top_containment_sumps")
+```
+
+[Table Note: [Placeholder: Description of tank top containment sumps.]]
+
+```{r under-dispenser-containment-table}
+#| label: tbl-under-dispenser-containment
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_under_dispenser_containment")
+```
+
+[Table Note: 'UDC' (Under Dispenser Containment) is a critical modern safety feature.]
+
+\newpage
+
+# Miscellaneous Components
+
+## Flexible Connectors
+
+```{r piping-flexible-connectors-table}
+#| label: tbl-piping-flexible-connectors
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_piping_flexible_connectors")
+```
+
+[Table Note: [Placeholder: Description of flexible connector types.]]
+
+```{r flex-tank-end-table}
+#| label: tbl-flex-tank-end
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_flex_tank_end")
+```
+
+[Table Note: [Placeholder: Description of flexible connectors at tank end.]]
+
+```{r flex-dispenser-end-table}
+#| label: tbl-flex-dispenser-end
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_flex_dispenser_end")
+```
+
+[Table Note: [Placeholder: Description of flexible connectors at dispenser end.]]
+
+\newpage
+
+## Other Hardware
+
+```{r pump-delivery-system-table}
+#| label: tbl-pump-delivery-system
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_pump_delivery_system")
+```
+
+[Table Note: [Placeholder: Description of pump delivery system types.]]
+
+```{r emergency-generator-table}
+#| label: tbl-emergency-generator
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_emergency_generator")
+```
+
+[Table Note: [Placeholder: Description of emergency generator installations.]]
+
+\newpage
+
+## Unclassified / Other
+
+```{r na-components-table}
+#| label: tbl-na-components
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_na")
+```
+
+[Table Note: [Placeholder: Description of unclassified or N/A component entries.]]
+
+```{r tank-upgrade-table}
+#| label: tbl-tank-upgrade
+#| echo: false
+#| results: asis
+#| tbl-pos: 'H'
+include_table("004_comp_tank_upgrade")
+```
+
+[Table Note: [Placeholder: Description of tank upgrade activities.]]
+
+\newpage
+
+# Temporal Evolution & Trends
+
+This section presents visualizations of how tank characteristics, fuel types, and facility attributes have evolved over time. These temporal patterns inform understanding of regulatory compliance trends and infrastructure modernization.
+
+\newpage
+
+## Capacity Evolution by Decade
+
+[Description: Distribution of tank capacities across installation decades, showing trends in tank sizing over time.]
+
+```{r capacity-evolution-figure}
+#| label: fig-capacity-evolution
+#| fig-cap: "Evolution of Tank Capacity Distribution by Installation Decade"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+include_figure("005_capacity_evolution_by_decade")
+```
+
+[Figure Note: [Placeholder: Interpretation of capacity trends—have tanks gotten larger over time? Implications for replacement costs and risk assessment.]]
+
+
+
+\newpage
+
+## Fuel Mix Evolution
+
+[Description: Temporal shift in the proportion of gasoline, diesel, and other fuel types in new tank installations.]
+
+```{r fuel-mix-evolution-figure}
+#| label: fig-fuel-mix-evolution
+#| fig-cap: "Evolution of Fuel Type Mix in New Installations (5-Year Periods)"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+include_figure("006_fuel_mix_evolution")
+```
+
+[Figure Note: [Placeholder: Analysis of fuel mix shifts—decline in gasoline share? Growth in diesel? Implications for risk profiles and insurance premiums.]]
+
+
+
+\newpage
+
+## Tank Lifespan Distribution
+
+[Description: Distribution of tank ages at closure, showing typical service life and identifying outliers.]
+
+```{r tank-lifespan-figure}
+#| label: fig-tank-lifespan
+#| fig-cap: "Distribution of Tank Age at Closure"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+include_figure("007_tank_lifespan_distribution")
+```
+
+[Figure Note: [Placeholder: Interpretation of lifespan patterns—median age, typical range, and implications for remaining useful life of active tanks.]]
+
+
+\newpage
+
+## Material Evolution
+
+[Description: Temporal trends in tank construction materials (Steel vs. Fiberglass/Composite) over installation periods.]
+
+```{r material-evolution-figure}
+#| label: fig-material-evolution
+#| fig-cap: "Evolution of Tank Construction Materials by Installation Period"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+include_figure("012_material_evolution")
+```
+
+[Figure Note: [Placeholder: Analysis of material shift—transition from steel to fiberglass/composite? Regulatory drivers? Cost and durability implications.]]
+
+# Facility-Level Intelligence
+
+This section examines facility-level aggregations, including size distributions, survival patterns, and relationships between facility age and complexity.
+
+
+
+## Facility Size Evolution by Decade
+
+[Description: Distribution of facility sizes (number of tanks per facility) across facility vintage decades.]
+
+```{r facility-size-evolution-figure}
+#| label: fig-facility-size-evolution
+#| fig-cap: "Evolution of Facility Size Distribution by Vintage Decade"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+include_figure("008_facility_size_evolution_by_decade")
+```
+
+[Figure Note: [Placeholder: Interpretation of facility size trends—are newer facilities larger or smaller? Implications for operational complexity and risk concentration.]]
+
+
+\newpage
+
+## Facility Status by Vintage
+
+[Description: Proportion of facilities in different status categories (Fully Active, Fully Closed, Mixed Status) by vintage decade.]
+
+```{r facility-status-vintage-figure}
+#| label: fig-facility-status-vintage
+#| fig-cap: "Facility Survival Status by Vintage Decade"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+include_figure("009_facility_status_by_vintage")
+```
+
+[Figure Note: [Placeholder: Analysis of facility survival patterns—do older facilities show higher closure rates? Implications for portfolio risk assessment.]]
+
+
+
+\newpage
+
+## Facility Age vs. Size Relationship
+
+[Description: Scatter plot examining the relationship between facility age and number of tanks, with smoothed trend line.]
+
+```{r facility-age-size-figure}
+#| label: fig-facility-age-size
+#| fig-cap: "Relationship Between Facility Age and Size"
+#| out-width: "100%"
+#| fig-width: 7
+#| fig-height: 4.5
+#| echo: false
+include_figure("010_facility_age_vs_size_scatter")
+```
+
+[Figure Note: [Placeholder: Interpretation of age-size relationship—do older facilities tend to be larger? Implications for modernization costs and operational risk.]]
+
