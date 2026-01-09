@@ -218,7 +218,7 @@ if (nrow(all_tanks_df) > 0) {
 }
 
 # ============================================================================
-# SECTION 4: BUILD LINKAGE & MASTER DATASETS
+# SECTION 4: BUILD LINKAGE & MASTER DATASETS (FIXED)
 # ============================================================================
 
 log_msg("Building Linkage Table and Master Tank Dataset...")
@@ -240,9 +240,9 @@ if (!is.null(active_gis) || !is.null(inactive_gis)) {
       gis_address = any_of(c("facility_address1", "attributes_facility_address1", "attributes_facility_a"))
     ) %>%
     filter(!is.na(permit_number)) %>%
-    # Ensure IDs are character to match Excel
+    # Ensure IDs are clean strings for joining
     mutate(
-      permit_number = as.character(permit_number),
+      permit_number = trimws(as.character(permit_number)),
       efacts_facility_id = as.character(efacts_facility_id)
     ) %>%
     # Deduplicate: prefer records with eFACTS IDs
@@ -253,26 +253,43 @@ if (!is.null(active_gis) || !is.null(inactive_gis)) {
   # This is the master list of unique facilities
   excel_facilities <- all_tanks_df %>%
     distinct(facility_id, .keep_all = TRUE) %>%
-    select(facility_id, facility_name, address, county, municipality, region_code, site_id, client_id, owner_name)
+    select(facility_id, facility_name, address, county, municipality, region_code, site_id, client_id, owner_name) %>%
+    mutate(facility_id = trimws(as.character(facility_id))) # Ensure key matches GIS
   
+  # --- CRITICAL FIX: Use FULL_JOIN to retain Inactive facilities from GIS ---
   linkage_table <- excel_facilities %>%
-    left_join(gis_combined, by = c("facility_id" = "permit_number"))
+    full_join(gis_combined, by = c("facility_id" = "permit_number")) %>%
+    mutate(
+      # If record came from GIS only (Inactive), fill missing metadata
+      facility_name = coalesce(facility_name, paste("Unlisted Facility", facility_id)),
+      address = coalesce(address, gis_address),
+      # Flag source for auditing
+      data_source = case_when(
+        !is.na(client_id) & !is.na(latitude) ~ "Both (Active)",
+        !is.na(client_id) ~ "Excel Only (Active)",
+        !is.na(latitude) ~ "GIS Only (Inactive/Unlisted)",
+        TRUE ~ "Unknown"
+      )
+    )
   
   saveRDS(linkage_table, file.path(paths$padep, "facility_linkage_table.rds"))
   write_csv(linkage_table, file.path(paths$padep, "facility_linkage_table.csv"))
   
-  log_msg(sprintf("✓ Saved Linkage Table: %d facilities. Ready for 02b Scraper.", nrow(linkage_table)))
+  log_msg(sprintf("✓ Saved Linkage Table: %d facilities (Active + Inactive).", nrow(linkage_table)))
   log_msg(sprintf("  - Records with eFACTS ID: %d", sum(!is.na(linkage_table$efacts_facility_id))))
+  log_msg(sprintf("  - Records from GIS Only (Fixed Inactives): %d", sum(linkage_table$data_source == "GIS Only (Inactive/Unlisted)")))
   
   # 3. CREATE MASTER TANK DATASET (For Analysis)
-  # This attaches the GIS location (lat/long) and eFACTS ID to every single tank row
+  # Note: This is primarily the Active tanks + GIS data. 
+  # Full Inactive tank history is handled in 02d_ssrs_process.R.
   master_tank_list <- all_tanks_df %>%
+    mutate(facility_id = trimws(as.character(facility_id))) %>%
     left_join(gis_combined, by = c("facility_id" = "permit_number"))
   
   saveRDS(master_tank_list, file.path(paths$processed, "master_tank_list.rds"))
   write_csv(master_tank_list, file.path(paths$processed, "master_tank_list.csv"))
   
-  log_msg(sprintf("✓ Saved Master Tank List: %d tanks with geospatial data.", nrow(master_tank_list)))
+  log_msg(sprintf("✓ Saved Master Tank List (Active): %d tanks with geospatial data.", nrow(master_tank_list)))
   
 } else {
   log_msg("⚠ GIS data missing - skipping Linkage/Master merge.", "WARN")

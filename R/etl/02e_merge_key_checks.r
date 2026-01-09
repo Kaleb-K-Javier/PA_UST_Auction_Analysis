@@ -1,182 +1,77 @@
-# R/validation/02_pre_refactor_audit.R
+# R/validation/03e_key_only_merge_test.R
 # ============================================================================
-# Pre-Refactor Audit: Linkage, Keys & Geometry (Master Version)
+# Key-Only Merge Validation
 # ============================================================================
-# Purpose: Comprehensive check of critical data paths before Refactoring.
-#          1. Schema Validation (County + Lat/Long Geometry).
-#          2. Key Format Inspection (Leading Zeros, Hyphens) across all DBs.
-#          3. Merge Match Rates & Spatial Data Coverage.
-# Output:  logs/pre_refactor_audit_log_master.txt
+# Purpose: Verify the "Merge Flow" by stripping datasets down to JUST their keys
+#          and running standard Inner Joins.
+#          This confirms the keys align and the merge function works at scale.
 # ============================================================================
 
 suppressPackageStartupMessages({
   library(data.table)
   library(janitor)
-  library(stringr)
   library(here)
 })
 
-# 1. Setup Logging
+cat("================================================================\n")
+cat("KEY-ONLY MERGE TEST (INNER JOINS)\n")
+cat("================================================================\n\n")
+
+# 1. Load & Clean
 # ----------------------------------------------------------------------------
-log_file <- here("logs", "pre_refactor_audit_log_master.txt")
-dir.create(dirname(log_file), showWarnings = FALSE, recursive = TRUE)
-sink(log_file, split = TRUE)
+tanks   <- readRDS(here("data/processed/pa_ust_master_facility_tank_database.rds"))
+claims  <- readRDS(here("data/processed/claims_clean.rds"))
+linkage <- fread(here("data/external/padep/facility_linkage_table.csv"))
 
-cat(paste0("================================================================\n"))
-cat(paste0("PRE-REFACTOR AUDIT REPORT (MASTER)\n"))
-cat(paste0("Run Date: ", Sys.time(), "\n"))
-cat(paste0("================================================================\n\n"))
+setDT(tanks); setDT(claims); setDT(linkage)
+tanks   <- clean_names(tanks)
+claims  <- clean_names(claims)
+linkage <- clean_names(linkage)
 
-# 2. Load Datasets
+# Fix Linkage Key Name
+if ("facility_id" %in% names(linkage)) setnames(linkage, "facility_id", "permit_number")
+
+# Standardize Keys (The Critical Fix)
+tanks[, fac_id := trimws(as.character(fac_id))]
+claims[, department := trimws(as.character(department))]
+linkage[, permit_number := trimws(as.character(permit_number))]
+
+# 2. Subset to Keys Only (The "Select Down" Step)
 # ----------------------------------------------------------------------------
-cat("--- Loading Datasets ---\n")
+k_tanks   <- unique(tanks[, .(fac_id)])
+k_claims  <- unique(claims[, .(department)])
+k_linkage <- unique(linkage[, .(permit_number)])
 
-path_tanks   <- here("data/processed/pa_ust_master_facility_tank_database.rds")
-path_claims  <- here("data/processed/claims_clean.rds")
-path_linkage <- here("data/external/padep/facility_linkage_table.csv")
+cat(sprintf("Unique Keys Loaded:\n"))
+cat(sprintf("  Tanks:   %d\n", nrow(k_tanks)))
+cat(sprintf("  Claims:  %d\n", nrow(k_claims)))
+cat(sprintf("  Linkage: %d\n\n", nrow(k_linkage)))
 
-# Load Tanks (New Master)
-if (file.exists(path_tanks)) {
-  tanks <- readRDS(path_tanks)
-  setDT(tanks)
-  tanks <- janitor::clean_names(tanks)
-  cat(sprintf("✓ Loaded Master Tank DB: %d rows\n", nrow(tanks)))
-} else {
-  stop("CRITICAL: New tank database not found at ", path_tanks)
-}
-
-# Load Claims
-if (file.exists(path_claims)) {
-  claims <- readRDS(path_claims)
-  setDT(claims)
-  cat(sprintf("✓ Loaded Claims: %d rows\n", nrow(claims)))
-} else {
-  stop("CRITICAL: Claims data not found at ", path_claims)
-}
-
-# Load Linkage
-if (file.exists(path_linkage)) {
-  linkage <- fread(path_linkage)
-  cat(sprintf("✓ Loaded Facility Linkage: %d rows\n", nrow(linkage)))
-  cat("  Raw Linkage Columns (first 5): ", paste(head(names(linkage), 5), collapse=", "), "...\n")
-  
-  # Clean names to standardize (e.g., attributes_latitude -> latitude)
-  linkage <- janitor::clean_names(linkage)
-  linkage <- unique(linkage, by = "permit_number") 
-} else {
-  stop("CRITICAL: Facility Linkage table not found at ", path_linkage)
-}
-cat("\n")
-
-# 3. Test 1: Linkage Table Schema Checks
+# 3. Execute Inner Joins (The "Merge Flow" Check)
 # ----------------------------------------------------------------------------
-cat("--- Test 1: Linkage Table Schema Checks ---\n")
-cat("Reference: qmd/data_dictionary.qmd (Section: facility_linkage_table)\n")
 
-# A. Permit Number Check
-if ("permit_number" %in% names(linkage)) {
-  cat("PASS: 'permit_number' column found.\n")
-} else {
-  cat("FAIL: 'permit_number' column NOT found.\n")
-}
+# Test A: Tanks <-> Linkage
+join_tl <- merge(k_tanks, k_linkage, by.x="fac_id", by.y="permit_number", all=FALSE)
+rate_tl <- nrow(join_tl) / nrow(k_tanks)
 
-# B. County Check
-if ("county" %in% names(linkage)) {
-  cat("PASS: 'county' column found.\n")
-} else {
-  cat("FAIL: 'county' column NOT found. Available: ", paste(head(names(linkage), 5), collapse=", "), "...\n")
-  grep_county <- grep("county", names(linkage), value=TRUE)
-  if (length(grep_county) > 0) cat("      Did you mean: ", paste(grep_county, collapse=", "), "?\n")
-}
+cat("[TEST A] Inner Join: Tanks (L) + Linkage (R)\n")
+cat(sprintf("  Result Rows: %d\n", nrow(join_tl)))
+cat(sprintf("  Match Rate:  %.1f%% (of Tanks)\n\n", rate_tl * 100))
 
-# C. Geometry Check (Lat/Long)
-geom_cols <- c("latitude", "longitude")
-missing_geom <- setdiff(geom_cols, names(linkage))
+# Test B: Claims <-> Linkage
+join_cl <- merge(k_claims, k_linkage, by.x="department", by.y="permit_number", all=FALSE)
+rate_cl <- nrow(join_cl) / nrow(k_claims)
 
-if (length(missing_geom) == 0) {
-  cat("PASS: 'latitude' and 'longitude' columns found.\n")
-} else {
-  # Fallback check for "attributes_" prefix if clean_names didn't strip it
-  alt_geom <- c("attributes_latitude", "attributes_longitude")
-  if (all(alt_geom %in% names(linkage))) {
-    cat("PASS: Geometry found as 'attributes_latitude' / 'attributes_longitude'.\n")
-    setnames(linkage, alt_geom, geom_cols) # Standardize
-  } else {
-    cat("FAIL: Geometry columns missing. Expected 'latitude'/'longitude'.\n")
-    cat("      Available columns matching 'lat|long':\n")
-    print(grep("lat|long", names(linkage), value=TRUE, ignore.case=TRUE))
-  }
-}
-cat("\n")
+cat("[TEST B] Inner Join: Claims (L) + Linkage (R)\n")
+cat(sprintf("  Result Rows: %d\n", nrow(join_cl)))
+cat(sprintf("  Match Rate:  %.1f%% (of Claims)\n\n", rate_cl * 100))
 
-# 4. Test 2: Key Format Inspection
-# ----------------------------------------------------------------------------
-cat("--- Test 2: Key Format Inspection (XX-XXXXX) ---\n")
+# Test C: Claims <-> Tanks
+join_ct <- merge(k_claims, k_tanks, by.x="department", by.y="fac_id", all=FALSE)
+rate_ct <- nrow(join_ct) / nrow(k_claims)
 
-regex_pat <- "^[0-9]{2}-[0-9]{5}$"
+cat("[TEST C] Inner Join: Claims (L) + Tanks (R)\n")
+cat(sprintf("  Result Rows: %d\n", nrow(join_ct)))
+cat(sprintf("  Match Rate:  %.1f%% (of Claims)\n", rate_ct * 100))
 
-bad_claims  <- mean(!str_detect(claims$department, regex_pat), na.rm=TRUE)
-bad_linkage <- mean(!str_detect(linkage$permit_number, regex_pat), na.rm=TRUE)
-bad_tanks   <- mean(!str_detect(tanks$fac_id, regex_pat), na.rm=TRUE)
-
-cat(sprintf("%% Non-Conforming Formats (Format Mismatch Risk):\n"))
-cat(sprintf("  Claims (department):    %.2f%%\n", bad_claims * 100))
-cat(sprintf("  Linkage (permit_number): %.2f%%\n", bad_linkage * 100))
-cat(sprintf("  Tanks (fac_id):          %.2f%%\n", bad_tanks * 100))
-cat("\n")
-
-# 5. Test 3: Merge Coverage & Spatial Data Availability
-# ----------------------------------------------------------------------------
-cat("--- Test 3: Merge Coverage & Spatial Data Availability ---\n")
-
-# We only select the columns strictly defined in the data dictionary
-cols_to_pull <- c("permit_number", "county", "latitude", "longitude")
-
-# Verify columns exist before merge
-cols_present <- intersect(cols_to_pull, names(linkage))
-if (length(cols_present) < length(cols_to_pull)) {
-  cat("WARNING: Proceeding with available columns only: ", paste(cols_present, collapse=", "), "\n")
-}
-
-# Merge Claims -> Linkage
-claims_link_merge <- merge(
-  claims[, .(claim_number, department)],
-  linkage[, ..cols_present],
-  by.x = "department",
-  by.y = "permit_number",
-  all.x = TRUE
-)
-
-# Calculate Match Rates
-match_rate <- mean(!is.na(claims_link_merge$county))
-geom_rate  <- mean(!is.na(claims_link_merge$latitude) & !is.na(claims_link_merge$longitude))
-
-cat(sprintf("Claims with linked County:    %.2f%%\n", match_rate * 100))
-cat(sprintf("Claims with linked Geometry:  %.2f%%\n", geom_rate * 100))
-
-if (geom_rate < match_rate) {
-  cat("NOTE: Some facilities matched the Linkage table but are missing Lat/Long values in the source.\n")
-}
-
-# 6. Diagnostics for Mismatches
-# ----------------------------------------------------------------------------
-if (match_rate < 0.9) {
-  cat("\n!!! DIAGNOSTIC: Mismatch Examples !!!\n")
-  cat("Claims 'department' NOT found in Linkage 'permit_number' (First 10):\n")
-  missed_ids <- setdiff(claims$department, linkage$permit_number)
-  print(head(missed_ids, 10))
-  
-  cat("\n--- Hypothesis Check: Leading Zeros ---\n")
-  cat("Checking if stripping leading zeros (e.g., '02-12345' -> '2-12345') improves match...\n")
-  
-  linkage[, permit_stripped := str_remove(permit_number, "^0+")]
-  claims[, dept_stripped := str_remove(department, "^0+")]
-  
-  stripped_match <- length(intersect(claims$dept_stripped, linkage$permit_stripped)) / nrow(claims)
-  cat(sprintf("Hypothetical match rate ignoring leading zeros: %.2f%%\n", stripped_match * 100))
-}
-
-cat("\n================================================================\n")
-cat("END OF AUDIT MASTER\n")
-sink()
-cat(paste0("Audit Complete. Log saved to: ", log_file, "\n"))
+cat("================================================================\n")
