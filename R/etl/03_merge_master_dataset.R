@@ -2,33 +2,10 @@
 # ============================================================================
 # Pennsylvania UST Analysis - ETL Step 3: Construct Master Analysis Dataset
 # ============================================================================
-# Purpose: Merge Claims + Contracts + Tanks (02d) + Linkage + Compliance
-# 
-# Inputs:
-#   - data/processed/claims_clean.rds
-#   - data/processed/contracts_clean.rds
-#   - data/processed/pa_ust_master_facility_tank_database.rds
-#   - data/processed/facility_linkage_table.csv
-#   - data/processed/efacts_violations.csv (if LOAD_EFACTS = TRUE)
-#   - data/processed/efacts_inspections.csv (if LOAD_EFACTS = TRUE)
-#
-# Outputs:
-#   - data/processed/master_analysis_dataset.rds
-#   - data/processed/analysis_panel.rds
-#   - data/processed/iv_analysis_panel.rds
+# Purpose: 
+#   1. Create "Facility Census" (Population Baseline) with Risk Shares.
+#   2. Create "Master Analysis Dataset" (Claims) with Exposure Windows & ML Features.
 # ============================================================================
-
-# ============================================================================
-# CONTROL FLAGS
-# ============================================================================
-
-LOAD_EFACTS <- FALSE  # Set TRUE when eFACTS scrape is complete
-
-# ============================================================================
-
-cat("\n========================================\n")
-cat("ETL Step 3: Master Dataset Construction\n")
-cat("========================================\n\n")
 
 suppressPackageStartupMessages({
   library(data.table)
@@ -36,15 +13,94 @@ suppressPackageStartupMessages({
   library(stringr)
   library(janitor)
   library(here)
+  library(quantmod)
 })
 
-paths <- list(processed = here("data/processed"),
-              padep = here('data', 'external', 'padep'))
 # ============================================================================
-# 1. LOAD DATA
+# 0. CONFIGURATION & PATHS
 # ============================================================================
+paths <- list(
+  processed = here("data/processed"),
+  padep = here("data", "external", "padep"),
+  raw_comps = here("data", "external", "padep", "allattributes(in).csv") 
+)
 
+# ============================================================================
+# 1. HELPER FUNCTIONS
+# ============================================================================
+get_cpi_factor <- function() {
+  tryCatch({
+    getSymbols("CPIAUCNS", src = "FRED", auto.assign = FALSE) %>%
+      as.data.table() %>%
+      setnames(c("index", "cpi")) %>%
+      .[, .(Year = year(index), Month = month(index), cpi)] %>%
+      .[, Infl_Factor := tail(cpi, 1) / cpi] 
+  }, error = function(e) {
+    return(data.table(Year = 1980:2030, Month = 1, Infl_Factor = 1.0))
+  })
+}
+
+classify_pa_sector <- function(name) {
+  fcase(
+    grepl("SHEETZ", name), "Major Chain (Sheetz)",
+    grepl("WAWA", name), "Major Chain (Wawa)",
+    grepl("RUTTER|CHR CORP", name), "Major Chain (Rutters)",
+    grepl("GETGO|GIANT EAGLE|GIANT FOOD|GIANT CO LLC", name), "Major Chain (GetGo/Giant)",
+    grepl("TURKEY HILL|KROGER|EG GROUP", name), "Major Chain (Turkey Hill/EG)",
+    grepl("SUNOCO|SUN OIL", name), "Major Chain (Sunoco)",
+    grepl("7 ELEVEN|7-11|7 11", name), "Major Chain (7-Eleven)",
+    grepl("SPEEDWAY", name), "Major Chain (Speedway)",
+    grepl("PILOT TRAVEL|FLYING J|LOVES TRAVEL", name), "Major Chain (Travel Center)",
+    grepl("ROYAL FARMS", name), "Major Chain (Royal Farms)",
+    grepl("COUNTRY FAIR", name), "Major Chain (Country Fair)",
+    grepl("UNITED REF|KWIK FILL|RED APPLE", name), "Major Chain (United Refining)",
+    grepl("WEIS MKT|WEIS MARKETS", name), "Major Chain (Weis)",
+    grepl("EXXON|MOBIL|SHELL|BP |GULF |TEXACO|CITGO|VALERO|LUKOIL", name), "Major Chain (Other Fuel Brand)",
+    grepl("WAL-MART|WALMART|SAMS CLUB", name), "Major Retail (Walmart)",
+    grepl("HOME DEPOT|LOWES|TARGET|COSTCO", name), "Major Retail (Big Box)",
+    grepl("COMMONWEALTH OF PA|PA DEPT|PENNDOT", name), "State Govt/Agency",
+    grepl("SCHOOL|SCH DIST|ACADEMY|COLLEGE|UNIV", name), "Education/School",
+    grepl("BORO|TWP|CITY OF|COUNTY|MUNICIPAL", name), "Local Govt/Muni",
+    grepl("FIRE|VOLUNTEER|EMS|AMBULANCE", name), "Emergency Services",
+    grepl("FEDERAL|US GOVT|POSTAL", name), "Federal Govt",
+    grepl("VERIZON|BELL ATLANTIC|COMCAST", name), "Utility/Telecom",
+    grepl("PP&L|PPL|PECO|DUQUESNE|FIRSTENERGY", name), "Utility/Energy",
+    grepl("HOSPITAL|HEALTH|UPMC|GEISINGER", name), "Healthcare",
+    grepl("AUTO|MOTORS|FORD|CHEVY|TOYOTA|HONDA", name), "Auto Dealership/Repair",
+    grepl("TRUCK|HAULING|TRANSPORT|LOGISTICS|PENSKE", name), "Trucking/Logistics",
+    grepl("CONST|EXCAVATING|PAVING|BUILDERS", name), "Construction/Development",
+    grepl("REALTY|PROPERTIES|MANAGEMENT|APARTMENTS", name), "Real Estate/Property Mgmt",
+    grepl("FARM|DAIRY|NURSERY", name), "Agriculture",
+    grepl("MFG|MANUFACTURING|STEEL|IRON|WORKS", name), "Manufacturing/Industrial",
+    default = "Private Commercial/Other"
+  )
+}
+
+categorize_business_model <- function(sector, count) {
+  fcase(
+    sector %in% c("State Govt/Agency", "Local Govt/Muni", "Federal Govt", 
+                  "Education/School", "Emergency Services", "Utility/Water & Sewer"), "Publicly Owned",
+    grepl("Major Chain|Major Retail", sector), "Retail Gas (Branded Commercial)",
+    sector %in% c("Utility/Telecom", "Utility/Energy", "Trucking/Logistics", 
+                  "Construction/Development", "Auto Dealership/Repair"), "Non-Retail: Fleet Fuel Facility",
+    sector %in% c("Manufacturing/Industrial", "Agriculture", "Healthcare", 
+                  "Real Estate/Property Mgmt", "Financial Services"), "Private Firm - Non-motor fuel seller",
+    sector == "Private Commercial/Other" & count == 1, "Retail Gas - Single Proprietor",
+    sector == "Private Commercial/Other" & count > 1, "Retail Gas - Multi-property Not Branded",
+    default = "Unknown/Unclassified"
+  )
+}
+
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+# ============================================================================
+# 2. LOAD DATA
+# ============================================================================
 cat("--- Loading Data ---\n")
+LOAD_EFACTS = FALSE
 
 # Claims
 claims <- readRDS(file.path(paths$processed, "claims_clean.rds"))
@@ -52,315 +108,251 @@ setDT(claims)
 claims[, department := trimws(as.character(department))]
 claims[, claim_number := trimws(as.character(claim_number))]
 claims <- claims[!str_detect(claim_number, "^Sum") & !is.na(department)]
-cat(sprintf("  Claims: %d\n", nrow(claims)))
 
 # Contracts
 contracts <- readRDS(file.path(paths$processed, "contracts_clean.rds"))
 setDT(contracts)
 contracts[, claim_number := trimws(as.character(claim_number))]
-cat(sprintf("  Contracts: %d\n", nrow(contracts)))
 
-# Tanks (02d output)
+# Tanks (Base dates only)
 tanks <- readRDS(file.path(paths$processed, "pa_ust_master_facility_tank_database.rds"))
 setDT(tanks)
-tanks[, FAC_ID := trimws(as.character(FAC_ID))]
+tanks[, `:=`(FAC_ID = trimws(as.character(FAC_ID)), TANK_ID = trimws(as.character(TANK_ID)))]
 tanks[, DATE_INSTALLED := as.IDate(DATE_INSTALLED)]
-cat(sprintf("  Tanks: %d\n", nrow(tanks)))
+if("Tank_Closed_Date" %in% names(tanks)) tanks[, Tank_Closed_Date := as.IDate(Tank_Closed_Date)]
 
-# Linkage
+# Components
+if (file.exists(paths$raw_comps)) {
+  components <- fread(paths$raw_comps, na.strings = c("", "NA", "NULL"), colClasses = "character") 
+  components <- clean_names(components)
+  if("fac_id" %in% names(components)) setnames(components, "fac_id", "FAC_ID")
+  if("tank_name" %in% names(components)) setnames(components, "tank_name", "TANK_ID")
+  if("attribute" %in% names(components)) setnames(components, "attribute", "CODE")
+  
+  components[, `:=`(
+    FAC_ID = trimws(as.character(FAC_ID)),
+    TANK_ID = trimws(as.character(TANK_ID)),
+    CODE = trimws(as.character(CODE)),
+    description = as.character(description)
+  )]
+} else {
+  stop("CRITICAL: Component data not found.")
+}
+
 # Linkage
 linkage <- fread(file.path(paths$padep, "facility_linkage_table.csv"))
-linkage[, permit_number := trimws(as.character(facility_id))]
-cat(sprintf("  Linkage: %d\n", nrow(linkage)))
-
-# Compliance (conditional)
-if (LOAD_EFACTS) {
-  violations <- fread(file.path(paths$processed, "efacts_violations.csv"))
-  inspections <- fread(file.path(paths$processed, "efacts_inspections.csv"))
-  cat(sprintf("  Violations: %d\n", nrow(violations)))
-  cat(sprintf("  Inspections: %d\n", nrow(inspections)))
-} else {
-  cat("  eFACTS: SKIPPED (LOAD_EFACTS = FALSE)\n")
-}
+if ("permit_number" %in% names(linkage) && !"facility_id" %in% names(linkage)) setnames(linkage, "permit_number", "facility_id")
+if ("owner_id" %in% names(linkage) && !"client_id" %in% names(linkage)) setnames(linkage, "owner_id", "client_id")
+linkage[, `:=`(
+  FAC_ID = trimws(as.character(facility_id)),
+  client_id = as.numeric(client_id),
+  owner_name = toupper(trimws(as.character(owner_name)))
+)]
 
 # ============================================================================
-# 2. TANK FLEET PROFILES
+# 3. OWNER CLASSIFICATION
 # ============================================================================
+cat("--- Running Owner Classification ---\n")
 
-cat("\n--- Building Tank Profiles ---\n")
+linkage[, owner_sector := classify_pa_sector(owner_name)]
+linkage[is.na(owner_name) | owner_name == "", owner_sector := "Unknown/Missing"]
 
-claims_mini <- claims[, .(claim_number, department, claim_date = as.IDate(claim_date))]
+owner_stats <- linkage[!is.na(client_id), .(
+  owner_sector_mode = getmode(owner_sector),
+  facility_count = uniqueN(FAC_ID)
+), by = client_id]
 
-# Join claims to tanks (many tanks per claim)
-tank_history <- merge(
-  claims_mini, tanks,
-  by.x = "department", by.y = "FAC_ID",
-  all.x = TRUE, allow.cartesian = TRUE
+owner_stats[, business_category := categorize_business_model(owner_sector_mode, facility_count)]
+owner_stats[, Owner_Size_Class := fcase(
+  facility_count == 1, "Single-Site Owner (Mom & Pop)",
+  facility_count >= 2 & facility_count <= 9, "Small Fleet (2-9)",
+  facility_count >= 10 & facility_count <= 49, "Medium Fleet (10-49)",
+  facility_count >= 50, "Large Fleet/Corporate (50+)",
+  default = "Unknown"
+)]
+
+linkage[owner_stats, on = "client_id", `:=`(
+  final_owner_sector = i.owner_sector_mode,
+  business_category = i.business_category,
+  Owner_Size_Class = i.Owner_Size_Class
+)]
+linkage[is.na(business_category), business_category := "Unknown/Unclassified"]
+
+# ============================================================================
+# 4. CONSTRUCT CENSUS (POPULATION BASELINE)
+# ============================================================================
+cat("--- Generating Census (Whole Population Risk Shares) ---\n")
+# This creates the dataset for 01_predictive_risk_profiling (Claims vs Population)
+
+# Merge Components to ALL tanks
+census_comps <- merge(tanks[, .(FAC_ID, TANK_ID)], components[, .(FAC_ID, TANK_ID, CODE)], 
+                      by = c("FAC_ID", "TANK_ID"), all.x = TRUE)
+
+# Calculate Facility-Level Risk Shares for the Census
+census_risk_profile <- census_comps[, .(
+  share_pressure_piping = mean(CODE == "4C", na.rm = TRUE),
+  share_bare_steel = mean(CODE %in% c("1A", "2A"), na.rm = TRUE),
+  share_no_electronic_detection = mean(CODE %in% c("12N", "5G"), na.rm = TRUE)
+), by = FAC_ID]
+
+# Handle NAs (no components = 0 share of specific risks, but high uncertainty)
+for(j in names(census_risk_profile)) set(census_risk_profile, which(is.na(census_risk_profile[[j]])), j, 0)
+
+# Merge back to Facility List
+census_master <- tanks[, .(
+  n_tanks = uniqueN(TANK_ID),
+  facility_age = 2025 - min(year(DATE_INSTALLED), na.rm=TRUE)
+), by = FAC_ID]
+
+census_master <- merge(census_master, census_risk_profile, by = "FAC_ID", all.x = TRUE)
+census_master <- merge(census_master, linkage[, .(FAC_ID, final_owner_sector, business_category)], by = "FAC_ID", all.x = TRUE)
+
+cat("Saving Census Profile...\n")
+saveRDS(census_master, file.path(paths$processed, "facility_census_profile.rds"))
+
+# ============================================================================
+# 5. CONSTRUCT EXPOSURE WINDOWS (CLAIMS ANALYSIS)
+# ============================================================================
+cat("--- Constructing Claim Exposure Windows ---\n")
+
+claim_windows <- claims[, .(claim_number, FAC_ID = department, claim_date = as.IDate(claim_date))]
+exposure_tanks <- merge(claim_windows, tanks, by = "FAC_ID", all.x = TRUE, allow.cartesian = TRUE)
+
+exposure_tanks <- exposure_tanks[
+  DATE_INSTALLED <= claim_date & 
+    (is.na(Tank_Closed_Date) | Tank_Closed_Date >= (claim_date - 365))
+]
+cat(sprintf("Identified %d active tank exposures.\n", nrow(exposure_tanks)))
+
+# ============================================================================
+# 6. DYNAMIC ML FEATURE GENERATION (CLAIMS ONLY)
+# ============================================================================
+cat("--- Generating Granular Features (Claims) ---\n")
+
+exposure_tanks[, TANK_ID := as.character(TANK_ID)]
+exposure_tanks[, FAC_ID := as.character(FAC_ID)]
+
+tank_features_raw <- merge(
+  exposure_tanks[, .(claim_number, FAC_ID, TANK_ID)],
+  components[, .(FAC_ID, TANK_ID, CODE, description)],
+  by = c("FAC_ID", "TANK_ID"),
+  all.x = TRUE, 
+  allow.cartesian = TRUE
 )
 
-# Tank age at claim date
-tank_history[, tank_age_at_claim := as.numeric(claim_date - DATE_INSTALLED) / 365.25]
+# Missing Data Tracking
+tanks_with_comps <- unique(tank_features_raw[!is.na(CODE), .(claim_number, TANK_ID)])
+tanks_with_comps[, has_data := TRUE]
 
-# Active at claim: installed before claim, not closed
-tank_history[, is_active := 
-  !is.na(DATE_INSTALLED) & 
-  DATE_INSTALLED <= claim_date & 
-  (is_closed == 0 | is.na(is_closed))]
+# Dynamic One-Hot
+tank_features_clean <- tank_features_raw[!is.na(CODE) & CODE != ""]
+tank_features_clean[, clean_desc := str_replace_all(toupper(description), "[^A-Z0-9]+", "_")]
+tank_features_clean[, clean_desc := str_trunc(clean_desc, 30, ellipsis = "")] 
+tank_features_clean[, feature_name := paste0("feat_", CODE, "_", clean_desc)]
 
-# Aggregate to claim level
-facility_profile <- tank_history[, .(
-  # Tank counts
-  n_tanks_total = .N,
-  n_tanks_active = sum(is_active, na.rm = TRUE),
-  
-  # Age metrics
-  avg_tank_age = mean(tank_age_at_claim[is_active == TRUE], na.rm = TRUE),
-  oldest_tank_age = max(tank_age_at_claim[is_active == TRUE], na.rm = TRUE),
-  
-  # Construction era risk
-  has_pre_1990_tank = any(year(DATE_INSTALLED) < 1990, na.rm = TRUE),
-  has_pre_1998_tank = any(year(DATE_INSTALLED) < 1998, na.rm = TRUE),
-  
-  # Construction type
-  has_single_wall = any(str_detect(TANK_CONSTRUCTION, "SINGLE|UNPROTECTED"), na.rm = TRUE),
-  has_double_wall = any(str_detect(TANK_CONSTRUCTION, "DOUBLE"), na.rm = TRUE),
-  has_fiberglass = any(str_detect(TANK_CONSTRUCTION, "FIBERGLASS|FRP"), na.rm = TRUE),
-  has_cathodic = any(str_detect(TANK_CONSTRUCTION, "CATHODIC"), na.rm = TRUE),
-  
- # Substance risk (full PADEP code list)
-  has_gasoline = any(SUBSTANCE_CODE %in% c("GAS", "GASOL"), na.rm = TRUE),
-  has_diesel = any(SUBSTANCE_CODE == "DIESL", na.rm = TRUE),
-  has_heating_oil = any(SUBSTANCE_CODE == "HO", na.rm = TRUE),
-  has_fuel_oil = any(SUBSTANCE_CODE == "FO", na.rm = TRUE),
-  has_kerosene = any(SUBSTANCE_CODE == "KERO", na.rm = TRUE),
-  has_jet_fuel = any(SUBSTANCE_CODE == "JET", na.rm = TRUE),
-  has_aviation_gas = any(SUBSTANCE_CODE == "AVGAS", na.rm = TRUE),
-  has_used_oil = any(SUBSTANCE_CODE %in% c("UMO", "USDOL", "WO"), na.rm = TRUE),
-  has_new_motor_oil = any(SUBSTANCE_CODE == "NMO", na.rm = TRUE),
-  has_biodiesel = any(SUBSTANCE_CODE == "BIDSL", na.rm = TRUE),
-  has_ethanol = any(SUBSTANCE_CODE == "ETHNL", na.rm = TRUE),
-  has_hazardous = any(SUBSTANCE_CODE %in% c("HZPRL", "HZSUB"), na.rm = TRUE),
-  has_unknown_substance = any(SUBSTANCE_CODE %in% c("UNK", "OTHER", "NPOIL"), na.rm = TRUE),
-  
-  # Capacity
-  total_capacity = sum(CAPACITY[is_active == TRUE], na.rm = TRUE),
-  max_capacity = max(CAPACITY[is_active == TRUE], na.rm = TRUE)
-  
+claim_features_long <- unique(tank_features_clean[, .(claim_number, feature_name)])
+claim_features_long[, present := 1]
+claim_features_wide <- dcast(claim_features_long, claim_number ~ feature_name, value.var = "present", fill = 0)
+
+# ============================================================================
+# 7. FACILITY PROFILE (SHARES & COUNTS)
+# ============================================================================
+cat("--- Calculating Risk Shares (Claims) ---\n")
+
+risk_shares <- tank_features_raw[, .(
+  share_pressure_piping = mean(CODE == "4C", na.rm = TRUE),
+  share_suction_safe = mean(CODE == "4A", na.rm = TRUE),
+  share_bare_steel = mean(CODE %in% c("1A", "2A"), na.rm = TRUE),
+  share_fiberglass = mean(CODE %in% c("1E", "1F", "2D"), na.rm = TRUE),
+  share_no_electronic_detection = mean(CODE %in% c("12N", "5G"), na.rm = TRUE),
+  share_pre_1989_permit = mean(CODE == "9A", na.rm = TRUE)
 ), by = claim_number]
 
-# Fix infinites
-facility_profile[is.infinite(oldest_tank_age), oldest_tank_age := NA]
-facility_profile[is.infinite(max_capacity), max_capacity := NA]
+# Merge missingness info
+exposure_tanks <- merge(exposure_tanks, tanks_with_comps, by=c("claim_number", "TANK_ID"), all.x=TRUE)
+exposure_tanks[is.na(has_data), has_data := FALSE]
 
-cat(sprintf("  Profiles: %d claims\n", nrow(facility_profile)))
+facility_stats <- exposure_tanks[, .(
+  n_tanks_total = uniqueN(TANK_ID),
+  n_tanks_missing_install_date = sum(is.na(DATE_INSTALLED)),
+  share_tanks_missing_install_date = mean(is.na(DATE_INSTALLED)),
+  n_tanks_missing_components = sum(has_data == FALSE),
+  share_tanks_missing_components = mean(has_data == FALSE),
+  avg_tank_age = mean(as.numeric(claim_date - DATE_INSTALLED)/365.25, na.rm = TRUE),
+  max_tank_age = max(as.numeric(claim_date - DATE_INSTALLED)/365.25, na.rm = TRUE),
+  share_single_wall = mean(str_detect(TANK_CONSTRUCTION, "SINGLE|UNPROTECTED"), na.rm = TRUE),
+  share_double_wall = mean(str_detect(TANK_CONSTRUCTION, "DOUBLE"), na.rm = TRUE),
+  has_gasoline = any(SUBSTANCE_CODE %in% c("GAS", "GASOL"), na.rm = TRUE),
+  has_diesel = any(SUBSTANCE_CODE == "DIESL", na.rm = TRUE)
+), by = claim_number]
 
-# ============================================================================
-# 3. SPATIAL FEATURES
-# ============================================================================
-## no zip code data in the dataset atm
-# cat("\n--- Spatial Features ---\n")
-
-# spatial <- linkage[, .(
-#   permit_number, latitude, longitude, municipality, zip,
-#   owner_name, efacts_facility_id
-# )]
-
-# # Density per zip
-# zip_density <- linkage[, .(facility_density_zip = .N), by = zip]
-# spatial <- merge(spatial, zip_density, by = "zip", all.x = TRUE)
-
-# ============================================================================
-# 4. COMPLIANCE FEATURES
-# ============================================================================
-
-cat("\n--- Compliance Features ---\n")
-
-if (LOAD_EFACTS) {
-  compliance <- violations[, .(
-    n_violations = .N,
-    total_penalties = sum(penalty_assessed, na.rm = TRUE)
-  ), by = efacts_facility_id]
-  
-  insp_summary <- inspections[, .(
-    n_inspections = .N,
-    n_with_violations = sum(str_detect(tolower(result), "violation"), na.rm = TRUE)
-  ), by = efacts_facility_id]
-  
-  compliance <- merge(compliance, insp_summary, by = "efacts_facility_id", all = TRUE)
-  cat(sprintf("  Compliance records: %d\n", nrow(compliance)))
-} else {
-  compliance <- NULL
-  cat("  Compliance: SKIPPED (will create NA columns)\n")
-}
+facility_stats[!is.finite(max_tank_age), max_tank_age := NA]
+facility_stats[!is.finite(avg_tank_age), avg_tank_age := NA]
+facility_stats[, is_over_30_years := (!is.na(max_tank_age) & max_tank_age >= 30)]
 
 # ============================================================================
-# 5. CONTRACT AGGREGATION
+# 8. MASTER MERGE
 # ============================================================================
+cat("--- Final Merge ---\n")
 
-cat("\n--- Contract Stats ---\n")
-
+# Contract Stats
 contract_stats <- contracts[, .(
   total_contract_value = sum(total_contract_value, na.rm = TRUE),
   n_contracts = .N,
   is_pfp = any(auction_type == "Bid-to-Result", na.rm = TRUE),
   is_sow = any(auction_type == "Scope of Work", na.rm = TRUE),
   date_first_contract = min(contract_start, na.rm = TRUE),
-  adjuster_id = first(na.omit(adjuster)),
-  brings_to_closure = any(brings_to_closure_flag == TRUE, na.rm = TRUE)
+  adjuster_id = first(na.omit(adjuster))
 ), by = claim_number]
 
-contract_stats[is.infinite(as.numeric(date_first_contract)), date_first_contract := NA]
+# CPI
+cpi_table <- get_cpi_factor()
+claims[, `:=`(Year = year(claim_date), Month = month(claim_date))]
+claims <- merge(claims, cpi_table[, .(Year, Month, Infl_Factor)], by = c("Year", "Month"), all.x = TRUE)
+claims[is.na(Infl_Factor), Infl_Factor := 1.0]
+claims[, total_paid_real := total_paid * Infl_Factor]
 
-# ============================================================================
-# 6. MASTER MERGE
-# ============================================================================
-
-cat("\n--- Merging ---\n")
-
+# Master Join
 master <- copy(claims)
-master <- merge(master, facility_profile, by = "claim_number", all.x = TRUE)
-# master <- merge(master, spatial, by.x = "department", by.y = "permit_number", all.x = TRUE)
+master <- merge(master, claim_features_wide, by = "claim_number", all.x = TRUE)
+feat_cols <- names(claim_features_wide)[names(claim_features_wide) != "claim_number"]
+for(col in feat_cols) set(master, which(is.na(master[[col]])), col, 0)
 
-if (!is.null(compliance) && "efacts_facility_id" %in% names(master)) {
-  master <- merge(master, compliance, by = "efacts_facility_id", all.x = TRUE)
-}
+master <- merge(master, risk_shares, by = "claim_number", all.x = TRUE)
+share_cols <- c("share_pressure_piping", "share_bare_steel", "share_no_electronic_detection")
+for(col in share_cols) set(master, which(is.na(master[[col]])), col, 0) 
 
+master <- merge(master, facility_stats, by = "claim_number", all.x = TRUE)
+master <- merge(master, linkage[, .(FAC_ID, final_owner_sector, business_category, Owner_Size_Class)], 
+                by.x = "department", by.y = "FAC_ID", all.x = TRUE)
 master <- merge(master, contract_stats, by = "claim_number", all.x = TRUE)
 
-cat(sprintf("  Final: %d rows\n", nrow(master)))
-
-# ============================================================================
-# 7. ANALYSIS VARIABLES
-# ============================================================================
-
-cat("\n--- Creating Analysis Variables ---\n")
-
-# --- COSTS ---
-master[, total_cost := fcoalesce(total_paid, incurred_loss, 0)]
-master[, log_cost := log(total_cost + 1)]
-master[, log_total_paid := log_cost]
-
-# --- CONTRACT FLAGS ---
+# Analysis Vars
+master[, log_cost := log(total_paid_real + 1)]
 master[is.na(is_pfp), is_pfp := FALSE]
 master[is.na(is_sow), is_sow := FALSE]
 master[is.na(n_contracts), n_contracts := 0]
-
 master[, contract_type := fcase(
   is_pfp, "Bid-to-Result",
   is_sow, "Scope of Work",
   n_contracts > 0, "Other Contract",
   default = "No Contract"
 )]
-master[, contract_type := factor(contract_type, 
-  levels = c("No Contract", "Scope of Work", "Bid-to-Result", "Other Contract"))]
-
-master[, has_contract := n_contracts > 0]
-master[, is_auction := is_pfp | is_sow]
-master[, is_PFP := is_pfp]
-master[, is_bid_to_result := is_pfp]
-
-master[, auction_type_factor := fcase(
-  is_pfp, "Bid-to-Result (PFP)",
-  is_sow, "Scope of Work",
-  n_contracts > 0, "Other Contract",
-  default = "No Contract"
-)]
-
-# --- DURATION ---
-master[, duration_years := claim_duration_years]
-
-# --- TANK DATA (No imputation - flag missing instead) ---
-master[, tank_age := avg_tank_age]
-master[, tank_age_missing := as.integer(is.na(avg_tank_age))]
-
-master[, capacity := total_capacity]
-master[, capacity_missing := as.integer(is.na(total_capacity) | total_capacity == 0)]
-
-master[, n_tanks := n_tanks_total]
-master[, tank_data_missing := as.integer(is.na(n_tanks_total))]
-
-# --- TIME TO INTERVENTION ---
-master[, time_to_auction := as.numeric(date_first_contract - as.IDate(claim_date)) / 365.25]
-master[is.na(time_to_auction), time_to_auction := 0]
-
-# --- ADJUSTER IV (Leave-One-Out) ---
-adj_stats <- master[!is.na(adjuster_id) & adjuster_id != "", .(
-  total_claims = .N,
-  total_pfp = sum(is_pfp)
-), by = adjuster_id]
-
-master <- merge(master, adj_stats, by = "adjuster_id", all.x = TRUE)
-master[, adjuster_leniency := (total_pfp - fifelse(is_pfp, 1, 0)) / (total_claims - 1)]
-master[total_claims < 5, adjuster_leniency := NA]
-master[, c("total_pfp", "total_claims") := NULL]
-master[, adjuster := adjuster_id]
-master[, has_valid_iv := !is.na(adjuster_leniency)]
-
-# --- GEOGRAPHY ---
 master[, county := str_to_title(trimws(county))]
-master[, region := str_extract(dep_region, "(?<=PADEP )\\w+")]
-master[is.na(region), region := "Unknown"]
-
 master[, region_cluster := fcase(
   county %in% c("Philadelphia", "Delaware", "Montgomery", "Bucks", "Chester"), "Southeast",
   county %in% c("Allegheny", "Washington", "Westmoreland"), "Southwest",
   default = "Other"
 )]
 
-# --- ERA ---
-master[, era := fcase(
-  claim_year < 2000, "Pre-2000",
-  claim_year < 2005, "2000-2004",
-  claim_year < 2010, "2005-2009",
-  claim_year < 2015, "2010-2014",
-  default = "2015+"
-)]
-master[, era_factor := factor(era, levels = c("Pre-2000", "2000-2004", "2005-2009", "2010-2014", "2015+"))]
-
-# --- COMPLIANCE (create columns regardless of LOAD_EFACTS) ---
-if (!"n_violations" %in% names(master)) {
-  master[, n_violations := NA_integer_]
-  master[, total_penalties := NA_real_]
-  master[, n_inspections := NA_integer_]
-  master[, n_with_violations := NA_integer_]
-}
-master[, has_prior_violations := fifelse(!is.na(n_violations) & n_violations > 0, TRUE, NA)]
-master[, compliance_data_missing := as.integer(is.na(n_violations))]
-
 # ============================================================================
-# 8. SAVE
+# 9. SAVE OUTPUTS
 # ============================================================================
-
-cat("\n--- Saving ---\n")
+cat("--- Saving ---\n")
+if(!dir.exists(paths$processed)) dir.create(paths$processed, recursive=TRUE)
 
 saveRDS(master, file.path(paths$processed, "master_analysis_dataset.rds"))
-fwrite(master, file.path(paths$processed, "master_analysis_dataset.csv"))
-saveRDS(master, file.path(paths$processed, "analysis_panel.rds"))
+analysis_panel <- master[total_paid_real > 1000 & !is.na(business_category)]
+saveRDS(analysis_panel, file.path(paths$processed, "analysis_panel.rds"))
 
-iv_panel <- master[has_valid_iv == TRUE]
-saveRDS(iv_panel, file.path(paths$processed, "iv_analysis_panel.rds"))
-
-# ============================================================================
-# SUMMARY
-# ============================================================================
-
-cat("\n========================================\n")
-cat("COMPLETE\n")
-cat("========================================\n")
-cat(sprintf("Claims:          %d\n", nrow(master)))
-cat(sprintf("Tank match:      %.1f%% (missing flag: tank_data_missing)\n", 
-            100 * mean(!is.na(master$n_tanks_total))))
-cat(sprintf("Spatial:         %.1f%%\n", 100 * mean(!is.na(master$latitude))))
-cat(sprintf("Contracts:       %.1f%%\n", 100 * mean(master$n_contracts > 0)))
-cat(sprintf("IV valid:        %.1f%%\n", 100 * mean(master$has_valid_iv, na.rm = TRUE)))
-cat(sprintf("Compliance:      %s\n", ifelse(LOAD_EFACTS, "LOADED", "NA (set LOAD_EFACTS=TRUE)")))
-cat("\nMissing data flags:\n")
-cat(sprintf("  tank_data_missing:     %d (%.1f%%)\n", 
-            sum(master$tank_data_missing), 100 * mean(master$tank_data_missing)))
-cat(sprintf("  tank_age_missing:      %d (%.1f%%)\n", 
-            sum(master$tank_age_missing), 100 * mean(master$tank_age_missing)))
-cat(sprintf("  capacity_missing:      %d (%.1f%%)\n", 
-            sum(master$capacity_missing), 100 * mean(master$capacity_missing)))
-cat(sprintf("  compliance_data_missing: %d (%.1f%%)\n", 
-            sum(master$compliance_data_missing), 100 * mean(master$compliance_data_missing)))
-cat("========================================\n\n")
+cat("COMPLETE: master_analysis_dataset.rds & facility_census_profile.rds created.\n")

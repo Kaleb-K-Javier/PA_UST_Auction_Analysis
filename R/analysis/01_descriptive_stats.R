@@ -1,379 +1,288 @@
-# R/analysis/01_descriptive_stats.R
-# ============================================================================
-# Pennsylvania UST Auction Analysis - Descriptive Statistics
-# ============================================================================
-# Purpose: Generate comprehensive summary statistics and visualizations
-# Note: This is DESCRIPTIVE analysis - no causal claims
-# Updates: Aligned with output_helpers.R (HTML/GT & PDF/LaTeX/Kable)
-# ============================================================================
+# R/analysis/01_risk_probability_modeling.R
+# ==============================================================================
+# Purpose: Comprehensive Risk & Cost Analysis (Panel Data Edition)
+#          PART A: Descriptive Statistics (Costs/Contracts from Claims Master)
+#          PART B: Hazard Modeling (Probability of Claim from Facility Panel)
+# ==============================================================================
 
-cat("\n========================================\n")
-cat("Descriptive Statistics Analysis\n")
-cat("========================================\n\n")
+suppressPackageStartupMessages({
+  library(data.table)
+  library(fixest)       # Fast OLS / Fixed Effects
+  library(grf)          # Generalized Random Forests
+  library(modelsummary) # Tables
+  library(kableExtra)
+  library(janitor)
+  library(stringr)
+  library(ggplot2)
+  library(scales)
+  library(patchwork)
+})
 
-# Load dependencies
-library(tidyverse)
-library(scales)
-library(patchwork)
-library(gt)
-library(gtsummary)
+# 1. SETUP & PATHS
+# ==============================================================================
+paths <- list(
+  panel     = "data/processed/panel_hazard_dataset.rds",
+  master    = "data/processed/master_analysis_dataset.rds",
+  tables    = "output/tables",
+  figures   = "output/figures"
+)
 
-# Source helper functions
-# (Ensure R/functions/output_helpers.R exists)
-if (file.exists("R/functions/output_helpers.R")) {
-  source("R/functions/output_helpers.R")
-} else {
-  stop("CRITICAL ERROR: R/functions/output_helpers.R not found. Please create this file.")
-}
-
-# Load paths
-if (!exists("paths")) {
-  paths <- list(
-    processed = "data/processed",
-    figures = "output/figures",
-    tables = "output/tables"
-  )
-}
-
-# Ensure output directories exist
-dir.create(paths$figures, recursive = TRUE, showWarnings = FALSE)
 dir.create(paths$tables, recursive = TRUE, showWarnings = FALSE)
+dir.create(paths$figures, recursive = TRUE, showWarnings = FALSE)
 
-# Load master dataset
-master <- readRDS(file.path(paths$processed, "master_analysis_dataset.rds"))
+# --- Output Helpers ---
+save_pub_table <- function(table_obj, filename_base) {
+  # If it's a kable/gt object, convert to string
+  if (!is.character(table_obj)) {
+    table_str <- as.character(table_obj)
+  } else {
+    table_str <- table_obj
+  }
+  writeLines(table_str, file.path(paths$tables, paste0(filename_base, ".html")))
+}
 
-cat(paste("Loaded:", nrow(master), "claims\n\n"))
+save_pub_figure <- function(plot_obj, filename_base) {
+  clean_plot <- plot_obj + 
+    theme_minimal(base_size = 14) +
+    theme(
+      plot.title    = element_blank(),
+      plot.subtitle = element_blank(),
+      axis.title    = element_text(face = "bold", color = "#2c3e50"),
+      axis.text     = element_text(color = "#2c3e50"),
+      legend.position = "bottom",
+      panel.grid.minor = element_blank()
+    )
+  ggsave(file.path(paths$figures, paste0(filename_base, ".png")), clean_plot, width=9, height=6, bg="white")
+  ggsave(file.path(paths$figures, paste0(filename_base, ".pdf")), clean_plot, width=9, height=6, bg="white")
+}
 
-# ============================================================================
-# SECTION 1: Overall Cost Distribution
-# ============================================================================
+# 2. DATA LOADING & PREP
+# ==============================================================================
+message("\n--- Loading Data ---")
+claims <- readRDS(paths$master) # For Part A (Costs)
+panel  <- readRDS(paths$panel)  # For Part B (Risk)
 
-cat("Section 1: Cost Distribution Analysis\n")
-cat("--------------------------------------\n")
+# --- FIX: Create Factor for Visualization ---
+if ("contract_type" %in% names(claims)) {
+  claims[, auction_type_factor := factor(contract_type, 
+                                         levels = c("No Contract", "Other Contract", "Scope of Work", "Bid-to-Result"))]
+} else {
+  claims[, auction_type_factor := factor("Unknown")]
+}
 
-# Summary statistics
-cost_summary <- master %>%
-  summarise(
-    N = n(),
-    Mean = mean(total_cost, na.rm = TRUE),
-    SD = sd(total_cost, na.rm = TRUE),
-    Min = min(total_cost, na.rm = TRUE),
-    P25 = quantile(total_cost, 0.25, na.rm = TRUE),
-    Median = quantile(total_cost, 0.50, na.rm = TRUE),
-    P75 = quantile(total_cost, 0.75, na.rm = TRUE),
-    P95 = quantile(total_cost, 0.95, na.rm = TRUE),
-    Max = max(total_cost, na.rm = TRUE),
-    Total = sum(total_cost, na.rm = TRUE)
-  )
+# Filter Claims for Analysis
+analysis_claims <- claims[total_paid_real > 1000]
 
-cat("\nOverall Cost Summary:\n")
-print(cost_summary %>% 
-        mutate(across(where(is.numeric), ~format(., big.mark = ",", digits = 0))))
+# ==============================================================================
+# PART A: THE COST OF RISK (Descriptive)
+# ==============================================================================
+message("\n--- Part A: Descriptive Statistics (Costs & Contracts) ---")
 
-# Figure 1: Cost Distribution (Histogram)
-fig1 <- ggplot(master, aes(x = total_cost)) +
-  geom_histogram(bins = 50, fill = "#1f77b4", alpha = 0.7, color = "white") +
+# 1. Cost Distribution
+p_cost <- ggplot(analysis_claims, aes(x = total_paid_real)) +
+  geom_histogram(bins = 45, fill = "#2c3e50", color = "white", alpha = 0.9) +
   scale_x_log10(labels = dollar_format()) +
-  geom_vline(aes(xintercept = median(total_cost, na.rm = TRUE)), 
-             linetype = "dashed", color = "red", linewidth = 1) +
-  annotate("text", x = median(master$total_cost, na.rm = TRUE) * 1.5, 
-           y = Inf, vjust = 2, hjust = 0,
-           label = paste("Median:", dollar(median(master$total_cost, na.rm = TRUE))),
-           color = "red", size = 3.5) +
-  labs(
-    title = "Distribution of UST Remediation Costs",
-    subtitle = "Log scale, USTIF claims 1994-2025",
-    x = "Total Cost (Log Scale)",
-    y = "Number of Claims",
-    caption = "Source: USTIF Administrative Data"
-  )
+  labs(x = "Total Real Cost (2024 Dollars, Log Scale)", y = "Number of Claims")
+save_pub_figure(p_cost, "201_real_cost_distribution")
 
-# Save Figure 1
-save_figure(
-  plot = fig1, 
-  filename = "01_cost_distribution",
-  output_dir = paths$figures,
-  width = 8, 
-  height = 5
-)
+# 2. Temporal Trends
+annual_stats <- analysis_claims[claim_year >= 1995, .(
+  Median_Cost = median(total_paid_real, na.rm=TRUE),
+  Mean_Cost   = mean(total_paid_real, na.rm=TRUE)
+), by = claim_year]
 
-# ============================================================================
-# SECTION 2: Temporal Trends
-# ============================================================================
-
-cat("\nSection 2: Temporal Trends\n")
-cat("---------------------------\n")
-
-# Annual summary
-annual_summary <- master %>%
-  group_by(claim_year) %>%
-  summarise(
-    n_claims = n(),
-    total_paid = sum(total_cost, na.rm = TRUE),
-    mean_cost = mean(total_cost, na.rm = TRUE),
-    median_cost = median(total_cost, na.rm = TRUE),
-    n_with_contract = sum(has_contract),
-    pct_with_contract = mean(has_contract) * 100,
-    .groups = "drop"
-  ) %>%
-  filter(!is.na(claim_year))
-
-# Figure 2: Claims Over Time
-fig2a <- ggplot(annual_summary, aes(x = claim_year, y = n_claims)) +
-  geom_col(fill = "#1f77b4", alpha = 0.7) +
-  geom_smooth(se = FALSE, color = "red", linewidth = 1, method = "loess") +
-  labs(
-    title = "Number of UST Claims by Year",
-    x = "Year",
-    y = "Number of Claims"
-  )
-
-# Figure 2b: Cost Trends
-fig2b <- ggplot(annual_summary, aes(x = claim_year)) +
-  geom_line(aes(y = median_cost, color = "Median"), linewidth = 1) +
-  geom_line(aes(y = mean_cost, color = "Mean"), linewidth = 1) +
+p_trend <- ggplot(annual_stats, aes(x = claim_year)) +
+  geom_line(aes(y = Mean_Cost, color = "Mean"), linewidth = 1.2) +
+  geom_line(aes(y = Median_Cost, color = "Median"), linewidth = 1.2) +
   scale_y_continuous(labels = dollar_format()) +
-  scale_color_manual(values = c("Median" = "#1f77b4", "Mean" = "#ff7f0e")) +
-  labs(
-    title = "Average Remediation Cost by Year",
-    x = "Year",
-    y = "Cost ($)",
-    color = "Statistic"
-  ) +
-  theme(legend.position = "bottom")
+  scale_color_manual(values = c("Mean" = "#e67e22", "Median" = "#2980b9")) +
+  labs(x = "Year", y = "Real Cost ($)", color = NULL)
+save_pub_figure(p_trend, "202_cost_trends")
 
-# Combine
-fig2 <- fig2a / fig2b
-
-# Save Figure 2
-save_figure(
-  plot = fig2, 
-  filename = "02_temporal_trends", 
-  output_dir = paths$figures,
-  width = 10, 
-  height = 8
-)
-
-# ============================================================================
-# SECTION 3: Geographic Distribution
-# ============================================================================
-
-cat("\nSection 3: Geographic Distribution\n")
-cat("-----------------------------------\n")
-
-# County summary
-county_stats <- master %>%
-  group_by(county) %>%
-  summarise(
-    n_claims = n(),
-    total_cost = sum(total_cost, na.rm = TRUE),
-    mean_cost = mean(total_cost, na.rm = TRUE),
-    median_cost = median(total_cost, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  arrange(desc(n_claims)) %>%
-  mutate(
-    pct_claims = n_claims / sum(n_claims) * 100,
-    cum_pct = cumsum(pct_claims)
-  )
-
-cat("\nTop 15 Counties by Number of Claims:\n")
-print(head(county_stats, 15))
-
-# Figure 3: Top Counties
-top_counties <- county_stats %>% head(15)
-
-fig3 <- ggplot(top_counties, aes(x = reorder(county, n_claims), y = n_claims)) +
-  geom_col(fill = "#1f77b4", alpha = 0.7) +
-  geom_text(aes(label = n_claims), hjust = -0.2, size = 3) +
-  coord_flip() +
-  labs(
-    title = "UST Claims by County (Top 15)",
-    subtitle = paste0("These counties account for ", 
-                      round(sum(top_counties$pct_claims), 1), "% of all claims"),
-    x = NULL,
-    y = "Number of Claims"
-  ) +
-  theme(axis.text.y = element_text(size = 9))
-
-# Save Figure 3
-save_figure(
-  plot = fig3, 
-  filename = "03_county_distribution", 
-  output_dir = paths$figures,
-  width = 8, 
-  height = 6
-)
-
-# ============================================================================
-# SECTION 4: Contract/Auction Analysis
-# ============================================================================
-
-cat("\nSection 4: Contract/Auction Characteristics\n")
-cat("--------------------------------------------\n")
-
-# Contract type summary
-contract_stats <- master %>%
-  group_by(auction_type_factor) %>%
-  summarise(
-    n = n(),
-    pct = n() / nrow(master) * 100,
-    mean_cost = mean(total_cost, na.rm = TRUE),
-    median_cost = median(total_cost, na.rm = TRUE),
-    sd_cost = sd(total_cost, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-cat("\nCost Summary by Contract Type:\n")
-print(contract_stats)
-
-# Figure 4: Cost by Contract Type (Box Plot)
-fig4 <- master %>%
-  filter(auction_type_factor != "Other Contract") %>%  # Focus on main categories
-  ggplot(aes(x = auction_type_factor, y = total_cost, fill = auction_type_factor)) +
-  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+# 3. Contract Mechanisms
+p_mech <- ggplot(analysis_claims[!is.na(auction_type_factor)], 
+                 aes(x = auction_type_factor, y = total_paid_real, fill = auction_type_factor)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
   scale_y_log10(labels = dollar_format()) +
-  scale_fill_manual(values = c("#7f7f7f", "#1f77b4", "#ff7f0e")) +
-  labs(
-    title = "Remediation Costs by Contract Type",
-    subtitle = "Note: Descriptive comparison only - not causal",
-    x = NULL,
-    y = "Total Cost (Log Scale)",
-    caption = "Box shows IQR with median; whiskers extend to 1.5 × IQR"
-  ) +
+  scale_fill_viridis_d(option = "mako", begin = 0.3, end = 0.8) +
+  labs(x = NULL, y = "Total Real Cost (Log Scale)") +
   theme(legend.position = "none")
+save_pub_figure(p_mech, "203_contract_mechanisms")
 
-# Save Figure 4
-save_figure(
-  plot = fig4, 
-  filename = "04_cost_by_contract_type", 
-  output_dir = paths$figures,
-  width = 8, 
-  height = 5
+# ==============================================================================
+# PART B: THE DRIVERS OF RISK (Hazard Modeling)
+# ==============================================================================
+message("\n--- Part B: Hazard Modeling (Panel Data) ---")
+
+# 1. Panel Filtering & Feature Aggregation
+risk_panel <- panel[Year >= 1995 & Year <= 2024 & n_active_tanks > 0]
+
+# Feature Construction (Safe Row Means)
+cols_bare_steel <- grep("feat_(1A|2A|UNPROTECTED|BARE)", names(risk_panel), value=TRUE, ignore.case=TRUE)
+cols_dbl_wall   <- grep("feat_.*DOUBLE", names(risk_panel), value=TRUE, ignore.case=TRUE)
+cols_pressure   <- grep("feat_.*PRESSURE", names(risk_panel), value=TRUE, ignore.case=TRUE)
+
+risk_panel[, `:=`(
+  share_bare_steel      = if(length(cols_bare_steel) > 0) rowMeans(.SD, na.rm=TRUE) else 0, 
+  share_double_wall     = if(length(cols_dbl_wall) > 0) rowMeans(.SD, na.rm=TRUE) else 0,
+  share_pressure_piping = if(length(cols_pressure) > 0) rowMeans(.SD, na.rm=TRUE) else 0
+), .SDcols = c(cols_bare_steel, cols_dbl_wall, cols_pressure)]
+
+# Zero-fill NAs explicitly to prevent regression drops
+for(v in c("share_bare_steel", "share_double_wall", "share_pressure_piping")) {
+  if(v %in% names(risk_panel)) {
+    set(risk_panel, i=which(is.na(risk_panel[[v]])), j=v, value=0)
+  }
+}
+
+# Age Bins
+risk_panel[, age_bin := cut(avg_tank_age, 
+                            breaks = c(-Inf, 5, 10, 15, 20, 25, 30, 35, 40, 45, Inf),
+                            labels = c("0-5", "05-10", "10-15", "15-20", "20-25", 
+                                       "25-30", "30-35", "35-40", "40-45", "45+"))]
+risk_panel[, age_bin := relevel(age_bin, ref = "0-5")]
+
+message(sprintf("Analysis Panel: %d facility-years. Total Events: %d", 
+                nrow(risk_panel), sum(risk_panel$has_claim_event)))
+
+# ------------------------------------------------------------------------------
+# 2. COMPARATIVE PROFILE
+# ------------------------------------------------------------------------------
+ever_claimant_ids <- unique(analysis_claims$department)
+risk_panel[, is_ever_claimant := FAC_ID %in% ever_claimant_ids]
+last_active <- risk_panel[, .SD[which.max(Year)], by = FAC_ID]
+
+vars_compare <- c("n_active_tanks", "avg_tank_age", "share_bare_steel", "share_double_wall")
+bal_tab <- last_active[, lapply(.SD, mean, na.rm=TRUE), by = is_ever_claimant, .SDcols = vars_compare]
+
+# Formatting
+bal_melt <- melt(bal_tab, id.vars = "is_ever_claimant")
+bal_cast <- dcast(bal_melt, variable ~ is_ever_claimant, value.var = "value")
+setnames(bal_cast, c("FALSE", "TRUE"), c("Never_Claimant", "Ever_Claimant"))
+
+bal_cast[, `:=`(
+  Metric = fcase(variable == "n_active_tanks", "Facility Size (Tanks)",
+                 variable == "avg_tank_age", "Avg Tank Age",
+                 variable == "share_bare_steel", "Share: Bare Steel",
+                 variable == "share_double_wall", "Share: Double Wall"),
+  Diff_Pct = (Ever_Claimant - Never_Claimant) / Never_Claimant
+)]
+
+bal_out <- bal_cast[, .(Metric, 
+                        No_Claim = round(Never_Claimant, 2), 
+                        Has_Claim = round(Ever_Claimant, 2), 
+                        Diff = percent(Diff_Pct, accuracy=0.1))]
+
+# Save with Kable styling
+save_pub_table(kbl(bal_out, format="html") %>% kable_styling(), "301_claimant_vs_nonclaimant_profile")
+
+# ------------------------------------------------------------------------------
+# 3. EXPLANATORY MODELING (OLS)
+# ------------------------------------------------------------------------------
+# We model the hazard rate.
+# Note: share_double_wall and share_pressure_piping might be dropped if collinear.
+# This is expected if they are perfectly correlated with bare_steel or each other.
+
+m_ols <- feols(has_claim_event ~ age_bin + n_active_tanks + 
+                 share_bare_steel + share_double_wall + share_pressure_piping, 
+               data = risk_panel, 
+               cluster = "FAC_ID")
+
+coef_map <- c(
+  "n_active_tanks" = "Facility Size",
+  "share_bare_steel" = "Share: Bare Steel",
+  "share_double_wall" = "Share: Double Wall",
+  "share_pressure_piping" = "Share: Pressure Piping",
+  "age_bin05-10" = "Age: 05-10", "age_bin10-15" = "Age: 10-15",
+  "age_bin15-20" = "Age: 15-20", "age_bin20-25" = "Age: 20-25",
+  "age_bin25-30" = "Age: 25-30", "age_bin30-35" = "Age: 30-35",
+  "age_bin35-40" = "Age: 35-40", "age_bin40-45" = "Age: 40-45",
+  "age_bin45+"   = "Age: 45+"
 )
 
-# ============================================================================
-# SECTION 5: Claim Duration Analysis
-# ============================================================================
+# FIX: output="kableExtra" ensures it returns an object compatible with kable_styling
+tab_ols <- modelsummary(
+  list("Annual Claim Probability (LPM)" = m_ols),
+  coef_map = coef_map,
+  stars = c('*' = .1, '**' = .05, '***' = .01),
+  gof_map = c("nobs", "r.squared"),
+  output = "kableExtra" 
+) %>% kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
 
-cat("\nSection 5: Claim Duration Analysis\n")
-cat("-----------------------------------\n")
+save_pub_table(tab_ols, "304_hazard_model_ols")
 
-# Duration statistics (closed claims only)
-duration_stats <- master %>%
-  filter(is_closed & !is.na(claim_duration_years)) %>%
-  summarise(
-    n_closed = n(),
-    mean_duration = mean(claim_duration_years, na.rm = TRUE),
-    median_duration = median(claim_duration_years, na.rm = TRUE),
-    sd_duration = sd(claim_duration_years, na.rm = TRUE),
-    min_duration = min(claim_duration_years, na.rm = TRUE),
-    max_duration = max(claim_duration_years, na.rm = TRUE)
-  )
+# ------------------------------------------------------------------------------
+# 4. PREDICTIVE MODELING (GRF)
+# ------------------------------------------------------------------------------
+message("Training Probability Forest (Clustered)...")
 
-cat("\nClaim Duration Statistics (Closed Claims):\n")
-print(duration_stats)
+feat_cols <- grep("^feat_", names(risk_panel), value = TRUE)
+meta_cols <- c("avg_tank_age", "n_active_tanks")
+ml_data <- risk_panel[, c(feat_cols, meta_cols, "has_claim_event", "FAC_ID"), with=FALSE]
+ml_data <- na.omit(ml_data)
 
-# Duration by contract type
-duration_by_contract <- master %>%
-  filter(is_closed & !is.na(claim_duration_years)) %>%
-  group_by(auction_type_factor) %>%
-  summarise(
-    n = n(),
-    mean_duration = mean(claim_duration_years, na.rm = TRUE),
-    median_duration = median(claim_duration_years, na.rm = TRUE),
-    .groups = "drop"
-  )
+# Use a subsample for training if N is very large (>200k), to keep it snappy
+# But 270k is manageable for GRF.
+set.seed(42)
+if(nrow(ml_data) > 100000) {
+  train_idx <- sample(nrow(ml_data), 100000)
+  ml_train <- ml_data[train_idx]
+} else {
+  ml_train <- ml_data
+}
 
-cat("\nDuration by Contract Type:\n")
-print(duration_by_contract)
+X <- as.matrix(ml_train[, .SD, .SDcols = c(feat_cols, meta_cols)])
+Y <- as.factor(ml_train$has_claim_event)
+Clusters <- as.numeric(as.factor(ml_train$FAC_ID))
 
-# ============================================================================
-# SECTION 6: Summary Statistics Table (Multi-Format)
-# ============================================================================
+# Train Forest
+rf_prob <- probability_forest(X, Y, clusters = Clusters, num.trees = 1000, seed = 42)
 
-cat("\nSection 6: Generating Summary Tables\n")
-cat("--------------------------------------\n")
+# Variable Importance
+imp <- variable_importance(rf_prob)
+imp_dt <- data.table(Feature = colnames(X), Importance = imp[,1])
+setorder(imp_dt, -Importance)
 
-# Create publication-ready summary table using gtsummary
-summary_table_obj <- master %>%
-  select(
-    total_cost, 
-    has_contract, 
-    is_auction,
-    claim_duration_years,
-    is_closed,
-    county,
-    dep_region
-  ) %>%
-  tbl_summary(
-    statistic = list(
-      all_continuous() ~ "{mean} ({sd}) | {median} [{p25}, {p75}]",
-      all_categorical() ~ "{n} ({p}%)"
-    ),
-    label = list(
-      total_cost ~ "Total Remediation Cost ($)",
-      has_contract ~ "Has Contract Record",
-      is_auction ~ "Procured via Auction",
-      claim_duration_years ~ "Claim Duration (Years)",
-      is_closed ~ "Claim Closed",
-      county ~ "County",
-      dep_region ~ "DEP Region"
-    ),
-    missing = "no"
-  ) %>%
-  modify_header(label ~ "**Variable**") %>%
-  bold_labels()
+imp_dt[, Label := gsub("feat_[0-9A-Z]+_", "", Feature)]
+imp_dt[, Label := str_to_title(gsub("_", " ", Label))]
+imp_dt[Feature == "avg_tank_age", Label := "Tank Age"]
+imp_dt[Feature == "n_active_tanks", Label := "Facility Size"]
 
-# Convert gtsummary to gt object for saving
-gt_summary <- as_gt(summary_table_obj)
+p_imp <- ggplot(head(imp_dt, 15), aes(x = reorder(Label, Importance), y = Importance)) +
+  geom_col(fill = "#2c3e50", width = 0.7) +
+  coord_flip() +
+  labs(x = NULL, y = "Importance (Claim Probability)")
+save_pub_figure(p_imp, "305_grf_hazard_importance")
 
-# Save using helper (handles HTML, LaTeX, PDF)
-save_gt_table(
-  table = gt_summary,
-  filename = "01_summary_statistics",
-  output_dir = paths$tables,
-  formats = c("html", "latex", "pdf")
-)
+# Surrogate Projection
+ml_train[, risk_score := predict(rf_prob, OOB = TRUE)$predictions[, 2]]
+surrogate <- feols(risk_score ~ avg_tank_age + n_active_tanks, 
+                   data = ml_train, cluster = "FAC_ID")
 
-# ============================================================================
-# SECTION 7: Export Results
-# ============================================================================
+tab_surr <- modelsummary(
+  list("ML Surrogate (Projection)" = surrogate),
+  coef_map = c("avg_tank_age" = "Age", "n_active_tanks" = "Size"),
+  output = "kableExtra"
+) %>% kable_styling()
+save_pub_table(tab_surr, "306_grf_surrogate_projection")
 
-# Compile all descriptive results
-descriptive_results <- list(
-  cost_summary = cost_summary,
-  annual_summary = annual_summary,
-  county_stats = county_stats,
-  contract_stats = contract_stats,
-  duration_stats = duration_stats,
-  duration_by_contract = duration_by_contract,
-  timestamp = Sys.time()
-)
+# PDP
+grid_age <- seq(0, 50, by = 2)
+pdp_base <- ml_train[sample(.N, min(2000, .N))]
+pdp_res <- lapply(grid_age, function(a) {
+  dt <- copy(pdp_base)
+  dt[, avg_tank_age := a]
+  preds <- predict(rf_prob, newdata = as.matrix(dt[, .SD, .SDcols = colnames(X)]))$predictions[,2]
+  data.table(Age = a, Mean_Risk = mean(preds))
+})
+pdp_dt <- rbindlist(pdp_res)
 
-saveRDS(descriptive_results, file.path(paths$processed, "descriptive_results.rds"))
+p_curve <- ggplot(pdp_dt, aes(x = Age, y = Mean_Risk)) +
+  geom_line(color = "#e74c3c", linewidth = 1.5) +
+  scale_y_continuous(labels = percent_format(accuracy=0.01)) +
+  labs(x = "Average Tank Age (Years)", y = "Predicted Annual Claim Probability")
+save_pub_figure(p_curve, "307_pdp_age_curve")
 
-# ============================================================================
-# SUMMARY
-# ============================================================================
-
-cat("\n========================================\n")
-cat("DESCRIPTIVE ANALYSIS COMPLETE\n")
-cat("========================================\n")
-cat("\nKey Findings (Descriptive Only):\n")
-cat(paste("  • Total claims analyzed:", nrow(master), "\n"))
-cat(paste("  • Median remediation cost:", dollar(cost_summary$Median), "\n"))
-cat(paste("  • Mean remediation cost:", dollar(cost_summary$Mean), "\n"))
-cat(paste("  • Claims with contract data:", sum(master$has_contract), 
-          "(", round(mean(master$has_contract) * 100, 1), "%)\n"))
-cat(paste("  • Claims procured via auction:", sum(master$is_auction),
-          "(", round(mean(master$is_auction) * 100, 1), "%)\n"))
-cat("\n")
-cat("Outputs:\n")
-cat("  • Figures saved to: output/figures/ (PNG + PDF)\n")
-cat("  • Tables saved to: output/tables/ (HTML + TeX + PDF)\n")
-cat("  • Results saved to: data/processed/descriptive_results.rds\n")
-cat("\n")
-cat("NEXT STEP:\n")
-cat("  Run: source('R/analysis/02_cost_correlates.R')\n")
-cat("========================================\n\n")
+message("\n========================================")
+message("ANALYSIS 01 (PANEL) COMPLETE")
+message("========================================")
