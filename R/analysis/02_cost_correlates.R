@@ -31,7 +31,6 @@ paths <- list(
 )
 
 walk(paths[-1], ~dir.create(., recursive = TRUE, showWarnings = FALSE))
-
 # ==============================================================================
 # 1. DATA PREPARATION
 # ==============================================================================
@@ -53,20 +52,21 @@ df_reg[, age_bin := cut(avg_tank_age, breaks = c(seq(0, 40, by = 10), Inf),
 risk_cols <- c("share_pressure_piping", "share_bare_steel", "share_no_electronic_detection")
 for(col in risk_cols) set(df_reg, i = which(is.na(df_reg[[col]])), j = col, value = 0)
 
-# Define Covariate Matrix (X) for ML
-# We exclude 'contract_type' from X because it is the TREATMENT in Section 4
+# --- CRITICAL FIX: Handle Missing Data for ML ---
+# Define variables intended for the model
 x_vars <- c("avg_tank_age", "n_tanks_total", risk_cols, 
             "business_category", "region_cluster")
 
-# Create Model Matrix (One-Hot Encoding for GRF)
+# Filter df_reg to keep only rows where ALL x_vars are observed
+# This ensures X and Y stay perfectly aligned
+df_reg <- df_reg[complete.cases(df_reg[, ..x_vars])]
+
+cat(sprintf("Final Analysis N: %d (Dropped rows with missing age/characteristics)\n", nrow(df_reg)))
+
+# Create Model Matrix (One-Hot Encoding)
 X <- model.matrix(as.formula(paste("~", paste(x_vars, collapse="+"), "-1")), df_reg)
 
-# ==============================================================================
-# 2. COST DRIVER ANALYSIS (REGRESSION FOREST)
-# ==============================================================================
-cat("\n--- 2. Running Cost Driver Analysis (Baseline Costs) ---\n")
-
-# Outcome: Log Total Real Cost
+# Define Outcome Y (Must match X dimensions)
 Y_cost <- log(df_reg$total_paid_real)
 
 # Train Regression Forest (predicts E[Y|X])

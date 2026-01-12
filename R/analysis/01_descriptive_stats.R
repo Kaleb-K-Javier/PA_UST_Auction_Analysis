@@ -184,7 +184,7 @@ save_pub_table(kbl(bal_out, format="html") %>% kable_styling(), "301_claimant_vs
 # This is expected if they are perfectly correlated with bare_steel or each other.
 
 m_ols <- feols(has_claim_event ~ age_bin + n_active_tanks + 
-                 share_bare_steel + share_double_wall + share_pressure_piping, 
+                 share_bare_steel + share_double_wall | , 
                data = risk_panel, 
                cluster = "FAC_ID")
 
