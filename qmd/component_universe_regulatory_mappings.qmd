@@ -1,27 +1,19 @@
 ---
-title: "Data Dictionary & Variable Construction Reference"
-subtitle: "Repo A: PA UST Combined Datasets"
-author:
-  - name: "Analytical Engine"
-    affiliation: "Project Team"
+title: "Component Universe: Coarsened Regulatory Compliance Mappings"
+subtitle: "Federal (40 CFR Part 280) and Pennsylvania (25 Pa. Code Ch. 245) Classifications"
 date: last-modified
-date-format: "MMMM D, YYYY"
-abstract: |
-  This document serves as the definitive technical reference for the raw datasets in Repo A (Facility/Tank Master Database). It characterizes the distributions of key variables—including tank status, substance types, and component attributes—and identifies specific data quality issues such as default installation dates. The frequency tables presented herein are intended to guide the "hotcoding" of binary variables and the treatment of missing data for downstream econometric analysis.
 format:
   pdf:
     toc: true
-    toc-depth: 2
+    toc-depth: 3
     number-sections: true
-    fontsize: 11pt
+    fontsize: 10pt
     geometry:
-      - top=1in
-      - bottom=1in
-      - left=1in
-      - right=1in
+      - top=0.75in
+      - bottom=0.75in
+      - left=0.5in
+      - right=0.5in
     keep-tex: false
-    link-citations: true
-    colorlinks: true
     include-in-header:
       text: |
         \usepackage{xcolor}
@@ -31,33 +23,57 @@ format:
         \usepackage{adjustbox}
         \usepackage{tabularx}
         \usepackage{array}
-        \usepackage{tikz}
-        \usetikzlibrary{shapes.geometric, arrows.meta, positioning, calc, shadows}
         \usepackage{longtable}
         \usepackage{booktabs}
         \usepackage{makecell}
         \usepackage{pdflscape}
         \renewcommand{\arraystretch}{1.2}
-  html:
-    toc: true
-    toc-depth: 2
-    number-sections: true
-    theme: cosmo
-    code-fold: true
 ---
-
-
 
 ```{r setup}
 #| echo: false
 #| warning: false
 #| message: false
-library(readr)
-library(dplyr)
+
 library(knitr)
-library(stringr)
 library(kableExtra)
+library(dplyr)
 library(tibble)
+
+# Helper function for consistent table styling
+render_compliance_table <- function(df, caption, footnotes = NULL) {
+  tbl <- kable(df, 
+               booktabs = TRUE, 
+               caption = caption,
+               escape = FALSE,
+               longtable = TRUE) %>%
+    kable_styling(
+      latex_options = c("repeat_header", "scale_down", "hold_position"),
+      font_size = 8,
+      full_width = TRUE
+    ) %>%
+    column_spec(1, width = "0.6cm") %>%
+    column_spec(2, width = "3.5cm") %>%
+    column_spec(3, width = "0.8cm") %>%
+    column_spec(4, width = "2.2cm") %>%
+    column_spec(5, width = "2.0cm") %>%
+    column_spec(6, width = "2.2cm") %>%
+    column_spec(7, width = "2.0cm") %>%
+    column_spec(8, width = "2.2cm")
+  
+  if (!is.null(footnotes)) {
+    tbl <- tbl %>%
+      footnote(
+        general = footnotes,
+        general_title = "Regulatory Notes: ",
+        footnote_as_chunk = TRUE,
+        threeparttable = TRUE
+      )
+  }
+  
+  return(tbl)
+}
+
 
 # --- CONFIGURATION ---
 # Adjust this path if your QMD is in a different folder than 'output/tables'
@@ -117,162 +133,11 @@ include_figure <- function(filename_base) {
   }
 }
 
-
-library(readr)
-library(kableExtra)
-
-render_compliance_table <- function(df, caption, footnotes = NULL, export_path = NULL) {
-  
-  # --- NEW: Export Logic ---
-  # If a path is provided, save the clean data immediately for ETL use
-  if (!is.null(export_path)) {
-    # Ensure the directory exists (optional, but good practice)
-    dir_name <- dirname(export_path)
-    if (!dir.exists(dir_name) && dir_name != ".") {
-      dir.create(dir_name, recursive = TRUE)
-    }
-    
-    # Write to CSV (using readr for better handling of special chars)
-    readr::write_csv(df, export_path)
-    message(paste("Exported data for ETL to:", export_path))
-  }
-  
-  # --- Existing Rendering Logic (Updated for Page Fit) ---
-  tbl <- kable(df, 
-               booktabs = TRUE, 
-               caption = caption,
-               escape = FALSE,
-               longtable = TRUE) %>% 
-    kable_styling(
-      # 'scale_down' removed to allow longtable to break pages correctly
-      latex_options = c("repeat_header", "hold_position"), 
-      font_size = 8,
-      full_width = TRUE 
-    ) %>%
-    # Column widths optimized for standard 8.5x11 page with 0.5" margins
-    column_spec(1, width = "0.9cm") %>%  # CODE
-    column_spec(2, width = "4.0cm") %>%  # COMPONENT_TYPE
-    column_spec(3, width = "0.8cm") %>%  # N
-    column_spec(4, width = "2.5cm") %>%  # COARSENED_CATEGORY
-    column_spec(5, width = "2.2cm") %>%  # FEDERAL_STATUS
-    column_spec(6, width = "2.2cm") %>%  # FEDERAL_CITATION
-    column_spec(7, width = "2.2cm") %>%  # PA_STATUS
-    column_spec(8, width = "2.2cm")      # PA_CITATION
-  
-  if (!is.null(footnotes)) {
-    tbl <- tbl %>%
-      footnote(
-        general = footnotes,
-        general_title = "Regulatory Notes: ",
-        footnote_as_chunk = TRUE,
-        threeparttable = TRUE
-      )
-  }
-  
-  return(tbl)
-}
-
-
 ```
 
-\newpage
 
-# Facility & Tank Characteristics
-
-This section details the primary grouping variables derived from the harmonized Active (PADEP) and Inactive (SSRS) datasets.
-
-## Tank Status
-
-[Description: Explanation of how Active vs. Inactive status is defined.]
-
-
-
-```{r tank-status-table}
-#| label: tbl-tank-status
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("001_tank_status_freq")
-```
-
-[Table Note: Verify if 'Temporarily Out of Use' tanks should be treated as active for auction eligibility.]
 
 \newpage
-## Substance Profile
-
-[Description: Breakdown of fuel types stored in the tanks, mapped from raw substance codes to boolean flags.]
-
-
-
-```{r substance-profile-table}
-#| label: tbl-substance-profile
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-include_table("002_substance_counts")
-```
-
-[Table Note: These counts are based on the mapping of raw substance codes (e.g., "GAS", "DIESL") to consolidated categories.]
-
-\newpage
-## Installation Date Diagnostics
-
-[Description: Assessment of data quality for DATE_INSTALLED.]
-
-
-
-```{r date-diagnostics-table}
-#| label: tbl-date-diagnostics
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-include_table("003_date_defaults")
-```
-
-[Table Note: The dates listed above are likely system defaults (e.g., 01/01/1900) and should be treated as missing values.]
-
-\newpage
-
-### KNN Date Imputation Diagnostics
-
-[Description: Comparison of reported installation dates vs. KNN-imputed dates for records with suspect default values. KNN regression (k=5) uses capacity, substance type, and region as features.]
-
-```{r knn-imputation-figure}
-#| label: fig-knn-imputation
-#| fig-cap: "KNN Date Imputation Diagnostics: Reported vs. Imputed Installation Years"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-include_figure("003b_knn_imputation_diagnostics")
-```
-
-[Figure Note: Density comparison showing distributional plausibility of KNN-imputed dates relative to observed installation years. Imputed values should align with historical installation patterns.]
-
-\newpage
-
-
-
-
-Here is the completely refactored code.
-
-I have updated every call to `render_compliance_table()` to include an `export_path` argument. This will automatically save a clean CSV of each mapping table to an `output/mappings/` folder every time you render the document, making them immediately available for your ETL pipeline.
-
-```r
-# Component Universe
-
-This section details the raw attributes available in the 'Compounds' table. These tables help map specific attributes to what the 'hotcoded' variables mean.
-We will also use  these tables to determine and build the corseined human-derired characteristics variables.
-
-
-
 
 # Tank Infrastructure
 
@@ -287,7 +152,6 @@ We will also use  these tables to determine and build the corseined human-derire
 #| tbl-pos: 'H'
 
 include_table("004_comp_tank_construction")
-
 ```
 
 \newpage
@@ -341,14 +205,12 @@ footnotes_tank <- c(
   "Secondary Containment required for all tanks installed/replaced after April 11, 2016 (Federal) or December 22, 2018 (PA).",
   "Single-wall Legacy tanks must use monthly release detection per §280.41(a)(1); §280.43(d)-(i).",
   "Lined tanks (1I, 1P) require internal inspection within 10 years of lining and every 5 years thereafter per §280.21(b)(1)(ii).",
-  "URLs: Federal: [https://www.ecfr.gov/current/title-40/part-280](https://www.ecfr.gov/current/title-40/part-280); PA: [https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/subchapEtoc.html](https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/subchapEtoc.html)"
+  "URLs: Federal: https://www.ecfr.gov/current/title-40/part-280; PA: https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/subchapEtoc.html"
 )
 
 render_compliance_table(tank_construction, 
                         "Tank Construction: Coarsened Regulatory Compliance Mapping",
-                        footnotes_tank,
-                        export_path = "output/mappings/map_tank_construction.csv")
-
+                        footnotes_tank)
 ```
 
 \newpage
@@ -364,7 +226,6 @@ render_compliance_table(tank_construction,
 #| tbl-pos: 'H'
 
 include_table("004_comp_tank_release_detection_method")
-
 ```
 
 \newpage
@@ -423,14 +284,12 @@ footnotes_rd <- c(
   "MTG (12F/12G) valid ONLY for tanks ≤1,000 gal (or ≤2,000 gal with specific diameter) per §280.43(b).",
   "Inventory Control + TTT (12A+12B/12C): Valid only 10 years post-install; as of 2026, all eligible tanks have exceeded this window.",
   "Annual testing of ATG components required per §280.40(a)(3); PA requires annual testing per §245.437(a)(3).",
-  "URLs: Federal: [https://www.ecfr.gov/current/title-40/part-280/subpart-D](https://www.ecfr.gov/current/title-40/part-280/subpart-D); PA: [https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/s245.444.html](https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/s245.444.html)"
+  "URLs: Federal: https://www.ecfr.gov/current/title-40/part-280/subpart-D; PA: https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/s245.444.html"
 )
 
 render_compliance_table(tank_rd, 
                         "Tank Release Detection Method: Coarsened Regulatory Compliance Mapping",
-                        footnotes_rd,
-                        export_path = "output/mappings/map_tank_release_detection.csv")
-
+                        footnotes_rd)
 ```
 
 \newpage
@@ -448,7 +307,6 @@ render_compliance_table(tank_rd,
 #| tbl-pos: 'H'
 
 include_table("004_comp_ug_piping_construction")
-
 ```
 
 \newpage
@@ -497,14 +355,12 @@ footnotes_ug_piping <- c(
   "'Replaced' defined as 50%+ of piping (excl. connectors) per §280.12; triggers secondary containment for entire run.",
   "Bare steel (2A) requires cathodic protection upgrade per §280.21(c) for legacy systems.",
   "CP systems require 3-year testing by qualified tester per §280.31(b); PA requires per §245.432.",
-  "URLs: Federal: [https://www.ecfr.gov/current/title-40/section-280.20](https://www.ecfr.gov/current/title-40/section-280.20); PA: [https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/s245.422.html](https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/s245.422.html)"
+  "URLs: Federal: https://www.ecfr.gov/current/title-40/section-280.20; PA: https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/s245.422.html"
 )
 
 render_compliance_table(ug_piping, 
                         "UG Piping Construction: Coarsened Regulatory Compliance Mapping",
-                        footnotes_ug_piping,
-                        export_path = "output/mappings/map_ug_piping.csv")
-
+                        footnotes_ug_piping)
 ```
 
 \newpage
@@ -520,7 +376,6 @@ render_compliance_table(ug_piping,
 #| tbl-pos: 'H'
 
 include_table("004_comp_ug_single_inner_wall_piping")
-
 ```
 
 \newpage
@@ -558,14 +413,12 @@ footnotes_inner <- c(
   "For single-wall legacy systems, this IS the piping material.",
   "FRP and Flex are non-corrodible per §280.20(b)(1); no cathodic protection required.",
   "Bare steel (28A) in legacy systems requires CP upgrade per §280.21(c).",
-  "URLs: Federal: [https://www.ecfr.gov/current/title-40/section-280.20](https://www.ecfr.gov/current/title-40/section-280.20)"
+  "URLs: Federal: https://www.ecfr.gov/current/title-40/section-280.20"
 )
 
 render_compliance_table(ug_inner_wall, 
                         "UG Single/Inner Wall Piping: Coarsened Regulatory Compliance Mapping",
-                        footnotes_inner,
-                        export_path = "output/mappings/map_ug_inner_wall.csv")
-
+                        footnotes_inner)
 ```
 
 \newpage
@@ -581,7 +434,6 @@ render_compliance_table(ug_inner_wall,
 #| tbl-pos: 'H'
 
 include_table("004_comp_ug_outer_wall_piping")
-
 ```
 
 \newpage
@@ -621,14 +473,12 @@ footnotes_outer <- c(
   "Code 29N (NONE) indicates SINGLE-WALL piping - acceptable only for legacy installs.",
   "Post-April 11, 2016 piping installations REQUIRE secondary containment (outer wall).",
   "EXCEPTION: Safe suction piping per §280.41(b)(1)(ii)(A)-(E) exempt from secondary containment.",
-  "URLs: Federal: [https://www.ecfr.gov/current/title-40/section-280.43](https://www.ecfr.gov/current/title-40/section-280.43)"
+  "URLs: Federal: https://www.ecfr.gov/current/title-40/section-280.43"
 )
 
 render_compliance_table(ug_outer_wall, 
                         "UG Outer Wall Piping: Coarsened Regulatory Compliance Mapping",
-                        footnotes_outer,
-                        export_path = "output/mappings/map_ug_outer_wall.csv")
-
+                        footnotes_outer)
 ```
 
 \newpage
@@ -644,7 +494,6 @@ render_compliance_table(ug_outer_wall,
 #| tbl-pos: 'H'
 
 include_table("004_comp_pipe_release_detection_method")
-
 ```
 
 \newpage
@@ -695,14 +544,12 @@ footnotes_pipe_rd <- c(
   "Safe Suction Exception (5I/5H may be valid): Meets ALL 5 criteria in §280.41(b)(1)(ii)(A)-(E).",
   "Annual ALLD testing required per §280.40(a)(3)(iii) - simulate leak to verify operation.",
   "LTT must detect 0.1 gph at 1.5× operating pressure per §280.44(b).",
-  "URLs: Federal: [https://www.ecfr.gov/current/title-40/section-280.44](https://www.ecfr.gov/current/title-40/section-280.44); PA: [https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/s245.445.html](https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/s245.445.html)"
+  "URLs: Federal: https://www.ecfr.gov/current/title-40/section-280.44; PA: https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/s245.445.html"
 )
 
 render_compliance_table(pipe_rd, 
                         "Piping Release Detection Method: Coarsened Regulatory Compliance Mapping",
-                        footnotes_pipe_rd,
-                        export_path = "output/mappings/map_pipe_release_detection.csv")
-
+                        footnotes_pipe_rd)
 ```
 
 \newpage
@@ -718,7 +565,6 @@ render_compliance_table(pipe_rd,
 #| tbl-pos: 'H'
 
 include_table("004_comp_line_leak_detector_shuts_off_pump")
-
 ```
 
 \newpage
@@ -744,14 +590,12 @@ footnotes_lld <- c(
   "Either shutoff (23Y) or alarm (23N with alarm) satisfies federal requirements.",
   "Automatic shutoff (23Y) is best practice for release prevention.",
   "Annual ALLD testing required per §280.40(a)(3)(iii).",
-  "URLs: Federal: [https://www.ecfr.gov/current/title-40/section-280.44](https://www.ecfr.gov/current/title-40/section-280.44)"
+  "URLs: Federal: https://www.ecfr.gov/current/title-40/section-280.44"
 )
 
 render_compliance_table(lld_shutoff, 
                         "Line Leak Detector Pump Shutoff: Coarsened Regulatory Compliance Mapping",
-                        footnotes_lld,
-                        export_path = "output/mappings/map_lld_shutoff.csv")
-
+                        footnotes_lld)
 ```
 
 \newpage
@@ -767,7 +611,6 @@ render_compliance_table(lld_shutoff,
 #| tbl-pos: 'H'
 
 include_table("004_comp_pump_delivery_system")
-
 ```
 
 \newpage
@@ -804,14 +647,12 @@ footnotes_pump <- c(
   "Code 4A may qualify for Safe Suction if ALL 5 criteria met - NO release detection required.",
   "Code 4B (CV at tank) FAILS Safe Suction criterion (D) - requires LTT every 3 years OR monthly monitoring.",
   "Post-April 11, 2016: Pressurized requires ALLD + Interstitial Monitoring per §280.41(b)(2)(i).",
-  "URLs: Federal: [https://www.ecfr.gov/current/title-40/section-280.41](https://www.ecfr.gov/current/title-40/section-280.41)"
+  "URLs: Federal: https://www.ecfr.gov/current/title-40/section-280.41"
 )
 
 render_compliance_table(pump_delivery, 
                         "Pump/Delivery System: Coarsened Regulatory Compliance Mapping",
-                        footnotes_pump,
-                        export_path = "output/mappings/map_pump_delivery.csv")
-
+                        footnotes_pump)
 ```
 
 \newpage
@@ -827,7 +668,6 @@ render_compliance_table(pump_delivery,
 #| tbl-pos: 'H'
 
 include_table("004_comp_piping_flexible_connectors")
-
 ```
 
 \newpage
@@ -869,14 +709,12 @@ footnotes_flex <- c(
   "Connectors inside containment sumps (PFLXD) satisfy secondary containment.",
   "Unprotected metallic (PFLXA) in ground contact requires CP upgrade per §280.21(c).",
   "Connectors 'not in contact with ground' (PFLXF) not subject to UG piping requirements.",
-  "URLs: Federal: [https://www.ecfr.gov/current/title-40/section-280.20](https://www.ecfr.gov/current/title-40/section-280.20)"
+  "URLs: Federal: https://www.ecfr.gov/current/title-40/section-280.20"
 )
 
 render_compliance_table(flex_connectors, 
                         "Piping Flexible Connectors: Coarsened Regulatory Compliance Mapping",
-                        footnotes_flex,
-                        export_path = "output/mappings/map_flex_connectors.csv")
-
+                        footnotes_flex)
 ```
 
 \newpage
@@ -892,7 +730,6 @@ render_compliance_table(flex_connectors,
 #| tbl-pos: 'H'
 
 include_table("004_comp_flex_tank_end")
-
 ```
 
 \newpage
@@ -929,14 +766,12 @@ flex_tank_end <- tribble(
 footnotes_flex_tank <- c(
   "Tank-end flexible connectors should be inside tank-top containment sump (26I) for best protection.",
   "Contained connectors (26I, 26M) satisfy secondary containment requirements.",
-  "URLs: Federal: [https://www.ecfr.gov/current/title-40/section-280.20](https://www.ecfr.gov/current/title-40/section-280.20)"
+  "URLs: Federal: https://www.ecfr.gov/current/title-40/section-280.20"
 )
 
 render_compliance_table(flex_tank_end, 
                         "Flex - Tank End: Coarsened Regulatory Compliance Mapping",
-                        footnotes_flex_tank,
-                        export_path = "output/mappings/map_flex_tank_end.csv")
-
+                        footnotes_flex_tank)
 ```
 
 \newpage
@@ -952,7 +787,6 @@ render_compliance_table(flex_tank_end,
 #| tbl-pos: 'H'
 
 include_table("004_comp_flex_dispenser_end")
-
 ```
 
 \newpage
@@ -990,14 +824,12 @@ footnotes_flex_disp <- c(
   "Dispenser-end connectors should be inside under-dispenser containment (UDC) per §280.20(f).",
   "UDC required for new dispenser systems installed after April 11, 2016.",
   "Contained connectors (27I, 27M) satisfy secondary containment requirements.",
-  "URLs: Federal: [https://www.ecfr.gov/current/title-40/section-280.20](https://www.ecfr.gov/current/title-40/section-280.20)"
+  "URLs: Federal: https://www.ecfr.gov/current/title-40/section-280.20"
 )
 
 render_compliance_table(flex_disp_end, 
                         "Flex - Dispenser End: Coarsened Regulatory Compliance Mapping",
-                        footnotes_flex_disp,
-                        export_path = "output/mappings/map_flex_dispenser_end.csv")
-
+                        footnotes_flex_disp)
 ```
 
 \newpage
@@ -1013,7 +845,6 @@ render_compliance_table(flex_disp_end,
 #| tbl-pos: 'H'
 
 include_table("004_comp_ag_piping_construction_corrosion_prot___")
-
 ```
 
 \newpage
@@ -1056,14 +887,12 @@ footnotes_ag <- c(
   "40 CFR 280 applies to USTs with >10% volume underground; AG piping requirements differ.",
   "PA regulates ASTs under 25 Pa. Code Ch. 245 Subchapter F (§245.501-545).",
   "Secondary containment for AG piping is best practice but not federally mandated.",
-  "URLs: PA AST: [https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/subchapFtoc.html](https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/subchapFtoc.html)"
+  "URLs: PA AST: https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/subchapFtoc.html"
 )
 
 render_compliance_table(ag_piping, 
                         "AG Piping Construction: Coarsened Regulatory Compliance Mapping",
-                        footnotes_ag,
-                        export_path = "output/mappings/map_ag_piping.csv")
-
+                        footnotes_ag)
 ```
 
 \newpage
@@ -1081,7 +910,6 @@ render_compliance_table(ag_piping,
 #| tbl-pos: 'H'
 
 include_table("004_comp_spill_prevention")
-
 ```
 
 \newpage
@@ -1116,14 +944,12 @@ footnotes_spill <- c(
   "Double-wall spill prevention (6D) with periodic monitoring may substitute for 3-year testing per §280.35(a)(1)(i).",
   "Exemptions per §280.20(c)(2): Tanks with permanently affixed top, fuel oil tanks meeting §280.10(c) criteria.",
   "PA requires 3-year testing or double-wall monitoring per §245.437(a)(1).",
-  "URLs: Federal: [https://www.ecfr.gov/current/title-40/section-280.35](https://www.ecfr.gov/current/title-40/section-280.35); PA: [https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/s245.437.html](https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/s245.437.html)"
+  "URLs: Federal: https://www.ecfr.gov/current/title-40/section-280.35; PA: https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/s245.437.html"
 )
 
 render_compliance_table(spill_prev, 
                         "Spill Prevention: Coarsened Regulatory Compliance Mapping",
-                        footnotes_spill,
-                        export_path = "output/mappings/map_spill_prevention.csv")
-
+                        footnotes_spill)
 ```
 
 \newpage
@@ -1139,7 +965,6 @@ render_compliance_table(spill_prev,
 #| tbl-pos: 'H'
 
 include_table("004_comp_overfill_prevention")
-
 ```
 
 \newpage
@@ -1180,14 +1005,12 @@ footnotes_overfill <- c(
   "When ball float requires replacement, must use automatic shutoff (7S) or alarm (7A).",
   "Inspection every 3 years required per §280.35(a)(2); verify activation level per §280.20(c).",
   "PA effective date December 22, 2018 for ball float prohibition per 48 Pa.B. 7875.",
-  "URLs: Federal: [https://www.ecfr.gov/current/title-40/section-280.20](https://www.ecfr.gov/current/title-40/section-280.20); PA: [https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/s245.421.html](https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/s245.421.html)"
+  "URLs: Federal: https://www.ecfr.gov/current/title-40/section-280.20; PA: https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter245/s245.421.html"
 )
 
 render_compliance_table(overfill_prev, 
                         "Overfill Prevention: Coarsened Regulatory Compliance Mapping",
-                        footnotes_overfill,
-                        export_path = "output/mappings/map_overfill_prevention.csv")
-
+                        footnotes_overfill)
 ```
 
 \newpage
@@ -1205,7 +1028,6 @@ render_compliance_table(overfill_prev,
 #| tbl-pos: 'H'
 
 include_table("004_comp_ust_total_secondarily_contained")
-
 ```
 
 \newpage
@@ -1234,14 +1056,12 @@ footnotes_ust_sec <- c(
   "Secondary containment = tank + piping + containment sumps all double-walled with interstitial monitoring.",
   "Legacy systems (18N pre-4/11/16) acceptable with monthly release detection per §280.41.",
   "PA effective date December 22, 2018 for secondary containment mandate.",
-  "URLs: Federal: [https://www.ecfr.gov/current/title-40/section-280.20](https://www.ecfr.gov/current/title-40/section-280.20)"
+  "URLs: Federal: https://www.ecfr.gov/current/title-40/section-280.20"
 )
 
 render_compliance_table(ust_secondary, 
                         "UST Secondarily Contained: Coarsened Regulatory Compliance Mapping",
-                        footnotes_ust_sec,
-                        export_path = "output/mappings/map_ust_secondary.csv")
-
+                        footnotes_ust_sec)
 ```
 
 \newpage
@@ -1257,7 +1077,6 @@ render_compliance_table(ust_secondary,
 #| tbl-pos: 'H'
 
 include_table("004_comp_tank_top_containment_sumps")
-
 ```
 
 \newpage
@@ -1286,14 +1105,12 @@ footnotes_tank_sumps <- c(
   "Per §280.12: Containment sump used for interstitial monitoring is part of secondary containment.",
   "Testing every 3 years required per §280.35(a)(1)(ii) if used for IM; double-wall with monitoring may substitute.",
   "Post-4/11/16 systems using IM must monitor all penetrations; partial (21S) may not satisfy.",
-  "URLs: Federal: [https://www.ecfr.gov/current/title-40/section-280.35](https://www.ecfr.gov/current/title-40/section-280.35)"
+  "URLs: Federal: https://www.ecfr.gov/current/title-40/section-280.35"
 )
 
 render_compliance_table(tank_top_sumps, 
                         "Tank-Top Containment Sumps: Coarsened Regulatory Compliance Mapping",
-                        footnotes_tank_sumps,
-                        export_path = "output/mappings/map_tank_top_sumps.csv")
-
+                        footnotes_tank_sumps)
 ```
 
 \newpage
@@ -1309,7 +1126,6 @@ render_compliance_table(tank_top_sumps,
 #| tbl-pos: 'H'
 
 include_table("004_comp_under_dispenser_containment")
-
 ```
 
 \newpage
@@ -1343,14 +1159,12 @@ footnotes_udc <- c(
   "UDC must be liquid-tight on sides, bottom, and penetrations per §280.20(f)(2).",
   "UDC must allow visual inspection/access OR periodic monitoring.",
   "PA effective date December 22, 2018 per 48 Pa.B. 7875.",
-  "URLs: Federal: [https://www.ecfr.gov/current/title-40/section-280.20](https://www.ecfr.gov/current/title-40/section-280.20)"
+  "URLs: Federal: https://www.ecfr.gov/current/title-40/section-280.20"
 )
 
 render_compliance_table(udc, 
                         "Under-Dispenser Containment: Coarsened Regulatory Compliance Mapping",
-                        footnotes_udc,
-                        export_path = "output/mappings/map_udc.csv")
-
+                        footnotes_udc)
 ```
 
 \newpage
@@ -1368,7 +1182,6 @@ render_compliance_table(udc,
 #| tbl-pos: 'H'
 
 include_table("004_comp_vapor_recovery")
-
 ```
 
 \newpage
@@ -1398,14 +1211,12 @@ footnotes_vapor <- c(
   "Many areas have DECOMMISSIONED Stage II due to ORVR vehicle technology.",
   "PA regulates vapor recovery under 25 Pa. Code Chapter 129 (air quality), not Chapter 245 (tanks).",
   "Consult PA DEP Air Quality for county-specific requirements.",
-  "URLs: PA Air Quality: [https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter129/chap129toc.html](https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter129/chap129toc.html)"
+  "URLs: PA Air Quality: https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter129/chap129toc.html"
 )
 
 render_compliance_table(vapor_recovery, 
                         "Vapor Recovery: Coarsened Regulatory Compliance Mapping",
-                        footnotes_vapor,
-                        export_path = "output/mappings/map_vapor_recovery.csv")
-
+                        footnotes_vapor)
 ```
 
 \newpage
@@ -1421,7 +1232,6 @@ render_compliance_table(vapor_recovery,
 #| tbl-pos: 'H'
 
 include_table("004_comp_stage_i_vapor_recovery")
-
 ```
 
 \newpage
@@ -1450,14 +1260,12 @@ footnotes_stage_i <- c(
   "2-POINT (19B): Separate fill and vapor return openings.",
   "Requirements depend on county ozone attainment status under Clean Air Act.",
   "Code 2I appears to be data entry error (piping code in vapor recovery field).",
-  "URLs: PA Air Quality: [https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter129/s129.82.html](https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter129/s129.82.html)"
+  "URLs: PA Air Quality: https://www.pacodeandbulletin.gov/Display/pacode?file=/secure/pacode/data/025/chapter129/s129.82.html"
 )
 
 render_compliance_table(stage_i, 
                         "Stage I Vapor Recovery: Coarsened Regulatory Compliance Mapping",
-                        footnotes_stage_i,
-                        export_path = "output/mappings/map_stage_i.csv")
-
+                        footnotes_stage_i)
 ```
 
 \newpage
@@ -1473,7 +1281,6 @@ render_compliance_table(stage_i,
 #| tbl-pos: 'H'
 
 include_table("004_comp_stage_ii_vapor_recovery")
-
 ```
 
 \newpage
@@ -1504,20 +1311,15 @@ footnotes_stage_ii <- c(
   "Most states allow/require Stage II DECOMMISSIONING (20D) for ORVR compatibility.",
   "Balance (20A) uses pressure differential; Assist (20B) uses vacuum pump.",
   "Decommissioned (20D) is now the expected/preferred status in most areas.",
-  "URLs: EPA ORVR: [https://www.epa.gov/gasoline-standards/gasoline-reid-vapor-pressure](https://www.epa.gov/gasoline-standards/gasoline-reid-vapor-pressure)"
+  "URLs: EPA ORVR: https://www.epa.gov/gasoline-standards/gasoline-reid-vapor-pressure"
 )
 
 render_compliance_table(stage_ii, 
                         "Stage II Vapor Recovery: Coarsened Regulatory Compliance Mapping",
-                        footnotes_stage_ii,
-                        export_path = "output/mappings/map_stage_ii.csv")
-
+                        footnotes_stage_ii)
 ```
 
 \newpage
-
-
-
 
 # Appendix: Key Regulatory Dates Reference
 
@@ -1789,861 +1591,56 @@ render_compliance_table(reg_cert,
 
 \newpage
 
+# Appendix: Compliance Status Decision Tree
 
-# Owner & Business Intelligence
-
-This section characterizes facility ownership structure, business model classification, and market segmentation derived from the harmonized facility linkage table.
-
-## Business Model Distribution
-
-[Description: Classification of facilities by business category based on owner sector and facility count logic.]
-
-```{r business-model-table}
-#| label: tbl-business-model
+```{r decision-tree}
+#| label: fig-decision-tree
 #| echo: false
 #| results: asis
 #| warning: false
 #| message: false
-#| tbl-pos: 'H'
-include_table("005_business_model_counts")
-```
+#| fig-cap: "Simplified Compliance Status Decision Framework"
 
-[Table Note: Business categories derived from owner name pattern matching and facility count thresholds. "Publicly Owned" includes government and municipal entities; "Retail Gas (Branded Commercial)" includes major chains.]
+cat("
+\\begin{center}
+\\textbf{UST Compliance Status Decision Framework}
+\\end{center}
+
+\\textbf{Step 1: Determine Installation/Replacement Date}
+\\begin{itemize}
+  \\item Pre-December 22, 1998: Subject to upgrade requirements (§280.21)
+  \\item December 22, 1998 - April 10, 2016: 'Legacy' system rules
+  \\item April 11, 2016 - Present (Federal) / December 22, 2018 - Present (PA): Secondary containment REQUIRED
+\\end{itemize}
+
+\\textbf{Step 2: For Post-April 11, 2016 Installations}
+\\begin{itemize}
+  \\item Tank: Must be double-wall with interstitial monitoring
+
+  \\item Piping: Must be double-wall with interstitial monitoring
+  \\item Dispenser: Must have under-dispenser containment (UDC)
+  \\item Exception: Safe suction piping meeting ALL 5 criteria (§280.41(b)(1)(ii))
+\\end{itemize}
+
+\\textbf{Step 3: For Legacy Installations (Pre-April 11, 2016)}
+\\begin{itemize}
+  \\item Single-wall tanks: Acceptable with monthly release detection
+  \\item Single-wall piping: Acceptable with ALLD (pressurized) or LTT/monitoring (suction)
+  \\item Ball float valve: Acceptable if installed before October 13, 2015
+  \\item Upgrades (CP, lining): Must meet ongoing inspection requirements
+\\end{itemize}
+
+\\textbf{Step 4: Verify Administrative Compliance}
+\\begin{itemize}
+  \\item Registration current? (§245.411)
+  \\item Annual fees paid? (§977.31(a)(2))
+  \\item Certified installers used? (§245.101-141)
+  \\item Operator training current? (§280.243)
+\\end{itemize}
+")
+```
 
 \newpage
-
-## Owner Fleet Size Distribution
-
-[Description: Distribution of facilities and tanks across owner size classes.]
-
-```{r owner-size-table}
-#| label: tbl-owner-size
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-include_table("006_owner_size_class_freq")
-```
-
-[Table Note: Owner size classification based on facility count per owner: Single-Site (1), Small Fleet (2-9), Medium Fleet (10-49), Large Fleet/Corporate (50+).]
-
-\newpage
-
-## Owner Sector Breakdown
-
-[Description: Top 25 owner sectors by tank count, derived from owner name pattern classification.]
-
-```{r owner-sector-table}
-#| label: tbl-owner-sector
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-include_table("007_owner_sector_freq")
-```
-
-[Table Note: Sector classification uses regex pattern matching on owner names to identify major chains, government entities, utilities, and commercial sectors.]
-
-\newpage
-
-## Facility Operational Status
-
-[Description: Aggregate facility-level operational status based on tank closure patterns.]
-
-```{r facility-status-table}
-#| label: tbl-facility-status
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-include_table("008_facility_status_freq")
-```
-
-[Table Note: "Fully Active" = all tanks in use; "Fully Closed" = all tanks closed; "Mixed Status" = some active/some closed.]
-
-\newpage
-
-## Owner Size vs Business Model Cross-Tabulation
-
-[Description: Cross-tabulation of owner fleet size against business category to identify structural patterns.]
-
-```{r owner-business-crosstab-table}
-#| label: tbl-owner-business-crosstab
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-include_table("009_owner_size_vs_business_crosstab")
-```
-
-[Table Note: Cell values represent unique facility counts. Useful for identifying which business models are dominated by small vs. large operators.]
-
-\newpage
-
-## Closure Rates by Business Category
-
-[Description: Tank closure rates stratified by business category to identify differential attrition patterns.]
-
-```{r closure-rates-table}
-#| label: tbl-closure-rates
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-include_table("010_closure_rates_by_facility_type")
-```
-
-[Table Note: Higher closure rates may indicate market exit, consolidation, or infrastructure modernization patterns specific to certain business types.]
-
-\newpage
-
-# Temporal Evolution & Trends
-
-This section presents visualizations of how tank characteristics, fuel types, and facility attributes have evolved over time. These temporal patterns inform understanding of regulatory compliance trends and infrastructure modernization.
-
-## Capacity Distribution
-
-[Description: Overall distribution of tank capacities across the fleet.]
-
-```{r capacity-distribution-figure}
-#| label: fig-capacity-distribution
-#| fig-cap: "Distribution of Tank Capacities (Gallons)"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-include_figure("005_capacity_distribution")
-```
-
-[Figure Note: Modal peaks at standard capacities (e.g., 10,000, 12,000, 15,000 gallons) indicate industry standardization. Long right tail represents commercial/industrial facilities.]
-
-\newpage
-
-## Capacity Evolution by Decade
-
-[Description: Distribution of tank capacities across installation decades, showing trends in tank sizing over time.]
-
-```{r capacity-evolution-figure}
-#| label: fig-capacity-evolution
-#| fig-cap: "Evolution of Tank Capacity Distribution by Installation Decade"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-include_figure("005b_capacity_evolution_by_decade")
-```
-
-[Figure Note: [Placeholder: Interpretation of capacity trends—have tanks gotten larger over time? Implications for replacement costs and risk assessment.]]
-
-
-
-\newpage
-
-## Fuel Mix Evolution
-
-[Description: Temporal shift in the proportion of gasoline, diesel, and other fuel types in new tank installations.]
-
-```{r fuel-mix-evolution-figure}
-#| label: fig-fuel-mix-evolution
-#| fig-cap: "Evolution of Fuel Type Mix in New Installations (5-Year Periods)"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-include_figure("006_fuel_mix_evolution")
-```
-
-[Figure Note: [Placeholder: Analysis of fuel mix shifts—decline in gasoline share? Growth in diesel? Implications for risk profiles and insurance premiums.]]
-
-
-
-\newpage
-
-## Tank Lifespan Distribution
-
-[Description: Distribution of tank ages at closure, showing typical service life and identifying outliers.]
-
-```{r tank-lifespan-figure}
-#| label: fig-tank-lifespan
-#| fig-cap: "Distribution of Tank Age at Closure"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-include_figure("007_tank_lifespan_distribution")
-```
-
-[Figure Note: [Placeholder: Interpretation of lifespan patterns—median age, typical range, and implications for remaining useful life of active tanks.]]
-
-
-\newpage
-
-# Facility-Level Intelligence
-
-This section examines facility-level aggregations, including size distributions, survival patterns, and relationships between facility age and complexity.
-
-
-
-## Facility Size Evolution by Decade
-
-[Description: Distribution of facility sizes (number of tanks per facility) across facility vintage decades.]
-
-```{r facility-size-evolution-figure}
-#| label: fig-facility-size-evolution
-#| fig-cap: "Evolution of Facility Size Distribution by Vintage Decade"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-include_figure("008_facility_size_evolution_by_decade")
-```
-
-[Figure Note: [Placeholder: Interpretation of facility size trends—are newer facilities larger or smaller? Implications for operational complexity and risk concentration.]]
-
-
-\newpage
-
-## Facility Status by Vintage
-
-[Description: Proportion of facilities in different status categories (Fully Active, Fully Closed, Mixed Status) by vintage decade.]
-
-```{r facility-status-vintage-figure}
-#| label: fig-facility-status-vintage
-#| fig-cap: "Facility Survival Status by Vintage Decade"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-include_figure("009_facility_status_by_vintage")
-```
-
-[Figure Note: [Placeholder: Analysis of facility survival patterns—do older facilities show higher closure rates? Implications for portfolio risk assessment.]]
-
-
-
-\newpage
-
-## Facility Age vs. Size Relationship
-
-[Description: Scatter plot examining the relationship between facility age and number of tanks, with smoothed trend line.]
-
-```{r facility-age-size-figure}
-#| label: fig-facility-age-size
-#| fig-cap: "Relationship Between Facility Age and Size"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-include_figure("010_facility_age_vs_size_scatter")
-```
-
-[Figure Note: [Placeholder: Interpretation of age-size relationship—do older facilities tend to be larger? Implications for modernization costs and operational risk.]]
-
-\newpage
-
-# Fleet Risk & Infrastructure Analytics
-
-This section examines construction-based risk tiers and capacity standardization trends to characterize infrastructure modernization patterns.
-
-## Fleet Risk Tier Transition
-
-[Description: Temporal evolution of tank construction risk tiers based on wall construction (single vs. double) and material type.]
-
-```{r fleet-risk-figure}
-#| label: fig-fleet-risk
-#| fig-cap: "Fleet Risk Tier Transition by Installation Period"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-include_figure("011_fleet_risk_transition")
-```
-
-[Figure Note: Risk tiers derived from TANK CONSTRUCTION component: "High Risk" = bare/single-wall steel; "Medium Risk" = single-wall fiberglass; "Low Risk" = double-walled or jacketed tanks. Transition toward lower-risk construction reflects regulatory evolution (e.g., 1998 EPA deadline).]
-
-\newpage
-
-## Capacity Standardization Trends
-
-[Description: Installation frequency of standard tank capacities over time, showing market convergence on common sizes.]
-
-```{r capacity-standardization-figure}
-#| label: fig-capacity-standardization
-#| fig-cap: "Installation Trends for Standard Tank Capacities (1980+)"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-include_figure("013_capacity_standardization_trends")
-```
-
-[Figure Note: Standard capacities (4000, 6000, 8000, 10000, 12000, 15000, 20000 gallons) shown. Trends indicate market preferences and potential cost efficiencies from standardization.]
-
-\newpage
-
-# Owner & Market Structure Analytics
-
-This section presents visualizations of ownership patterns, market concentration, and temporal evolution of business categories.
-
-## Owner Size Distribution
-
-[Description: Distribution of tank counts across owner size classes.]
-
-```{r owner-size-distribution-figure}
-#| label: fig-owner-size-distribution
-#| fig-cap: "Tank Count Distribution by Owner Size Class"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-include_figure("014_owner_size_distribution")
-```
-
-[Figure Note: Horizontal bar chart showing relative market share by owner fleet size. Single-site operators vs. corporate fleet concentration.]
-
-\newpage
-
-## Mom & Pop Sector Breakdown
-
-[Description: Sector distribution within single-site ("Mom & Pop") owners, showing business type diversity.]
-
-```{r mom-pop-sector-figure}
-#| label: fig-mom-pop-sector
-#| fig-cap: "Top 10 Sectors Among Single-Site Owners"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-include_figure("015_mom_pop_sector_breakdown")
-```
-
-[Figure Note: Identifies which business sectors dominate the single-site owner segment—critical for understanding small operator vulnerability to remediation costs.]
-
-\newpage
-
-## Major Chains Market Share
-
-[Description: Tank counts for major retail chains operating in Pennsylvania.]
-
-```{r major-chains-figure}
-#| label: fig-major-chains
-#| fig-cap: "Major Chains Market Share by Tank Count"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-include_figure("016_major_chains_market_share")
-```
-
-[Figure Note: Identifies dominant retail fuel chains (Sheetz, Wawa, GetGo, etc.) and their relative infrastructure footprints in Pennsylvania.]
-
-\newpage
-
-## Owner Size Evolution
-
-[Description: Temporal evolution of installation share by owner size class.]
-
-```{r owner-size-evolution-figure}
-#| label: fig-owner-size-evolution
-#| fig-cap: "Evolution of Tank Installations by Owner Size Class (5-Year Periods)"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-include_figure("017_owner_size_evolution")
-```
-
-[Figure Note: Stacked area showing market consolidation trends—increasing corporate share vs. declining single-site operator share over time.]
-
-\newpage
-
-## Business Category Evolution
-
-[Description: Temporal evolution of installation share by business category classification.]
-
-```{r business-category-evolution-figure}
-#| label: fig-business-category-evolution
-#| fig-cap: "Evolution of Tank Installations by Business Category (5-Year Periods)"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-include_figure("018_business_category_evolution")
-```
-
-[Figure Note: Shows structural shifts in who is installing tanks—retail gas, fleet operations, public sector, etc. Useful for understanding changing composition of USTIF portfolio.]
-
-\newpage
-
-# Closure Dynamics
-
-This section examines tank closure patterns over time, stratified by facility type.
-
-## Tank Closures by Facility Type Timeline
-
-[Description: Annual tank closures by business category, showing differential exit/modernization patterns.]
-
-```{r closures-by-type-figure}
-#| label: fig-closures-by-type
-#| fig-cap: "Tank Closures by Facility Type (1985-2025)"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-include_figure("019_tank_closures_by_facility_type_timeline")
-```
-
-[Figure Note: Stacked area chart showing closure volume by business category over time. Peaks may correspond to regulatory deadlines (e.g., 1998 EPA compliance), market consolidation waves, or economic shocks. Useful for understanding historical claim volume drivers.]
-
-
-
-\newpage
-
-# USTIF Claims & Contracts Analysis
-
-This section provides a summary of the USTIF claims and remediation contracts, adjusted for inflation to **2024 Real Dollars**.
-
-## Claims Overview
-
-[Description: Operational status and financial severity of claims, adjusted for inflation.]
-```{r claims-status-table}
-#| label: tbl-claims-status
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("101_claims_status_summary")
-```
-
-[Table Note: Claims categorized by operational status with real dollar costs adjusted to 2024 base year.]
-
-\newpage
-
-## Financial Severity
-
-[Description: Distribution of real claim costs (log scale) showing the prevalence of high-severity events.]
-```{r claims-severity-figure}
-#| label: fig-claims-severity
-#| fig-cap: "Distribution of Real Claim Severities (2024 Dollars)"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 4.5
-#| echo: false
-
-include_figure("105_claims_cost_distribution_real")
-```
-
-[Figure Note: Log-scale distribution reveals long right tail characteristic of environmental remediation costs.]
-
-\newpage
-
-## Contracts & Auctions
-
-[Description: Analysis of remediation contracts, comparing Bid-to-Result mechanisms against traditional models.]
-```{r contract-types-table}
-#| label: tbl-contract-types
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("106_contract_auction_types")
-```
-
-[Table Note: Contract mechanism breakdown showing PFP auction vs. T&M allocation patterns.]
-
-\newpage
-```{r contract-values-figure}
-#| label: fig-contract-values
-#| fig-cap: "Contract Value Distribution by Mechanism (Real 2024 Dollars)"
-#| out-width: "100%"
-#| fig-width: 7
-#| fig-height: 5
-#| echo: false
-
-include_figure("108_contract_value_real_boxplot")
-```
-
-[Figure Note: Boxplot comparison of contract values by mechanism type. Caution: raw comparisons subject to selection bias per "naive fallacy" identified in research design.]
-
-\newpage
-
-# Appendix: Variable Inventory
-
-[Description: Complete frequency dictionary for categorical variables in the Claims and Contracts datasets.]
-
-## Claims Variables
-
-### Claim Status
-```{r var-claim-status-table}
-#| label: tbl-var-claim-status
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("110_var_claim_status")
-```
-
-[Table Note: Distribution of claim operational status (open/closed).]
-
-\newpage
-
-### DEP Region
-```{r var-dep-region-table}
-#| label: tbl-var-dep-region
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("110_var_dep_region")
-```
-
-[Table Note: Geographic distribution of claims across PA DEP regional offices.]
-
-\newpage
-
-### County
-```{r var-county-table}
-#| label: tbl-var-county
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("110_var_county")
-```
-
-[Table Note: County-level claim frequency distribution.]
-
-\newpage
-
-### Location Description
-```{r var-location-desc-table}
-#| label: tbl-var-location-desc
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("110_var_location_desc")
-```
-
-[Table Note: Facility location type classification.]
-
-\newpage
-
-### Products
-```{r var-products-table}
-#| label: tbl-var-products
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("110_var_products")
-```
-
-[Table Note: Substance/product types associated with claims.]
-
-\newpage
-
-### Is Closed
-```{r var-is-closed-table}
-#| label: tbl-var-is-closed
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("110_var_is_closed")
-```
-
-[Table Note: Binary indicator for claim closure status.]
-
-\newpage
-
-### Is Open
-```{r var-is-open-table}
-#| label: tbl-var-is-open
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("110_var_is_open")
-```
-
-[Table Note: Binary indicator for claim open status.]
-
-\newpage
-
-## Contracts Variables
-
-### Adjuster
-```{r var-adjuster-table}
-#| label: tbl-var-adjuster
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("111_var_adjuster")
-```
-
-[Table Note: ICF Claims Evaluator assignment distribution. Key variable for instrumental variable identification strategy.]
-
-\newpage
-
-### Consultant
-```{r var-consultant-table}
-#| label: tbl-var-consultant
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("111_var_consultant")
-```
-
-[Table Note: Environmental consulting firm assignment frequency.]
-
-\newpage
-
-### Brings to Closure
-```{r var-brings-to-closure-table}
-#| label: tbl-var-brings-to-closure
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("111_var_brings_to_closure")
-```
-
-[Table Note: Contract scope classification regarding site closure responsibility.]
-
-\newpage
-
-### Contract Category
-```{r var-contract-category-table}
-#| label: tbl-var-contract-category
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("111_var_contract_category")
-```
-
-[Table Note: High-level contract type categorization.]
-
-\newpage
-
-### Bid Type
-```{r var-bid-type-table}
-#| label: tbl-var-bid-type
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("111_var_bid_type")
-```
-
-[Table Note: Procurement mechanism classification (competitive bid vs. negotiated).]
-
-\newpage
-
-### Contract Type Raw
-```{r var-contract-type-raw-table}
-#| label: tbl-var-contract-type-raw
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("111_var_contract_type_raw")
-```
-
-[Table Note: Original contract type codes from source data.]
-
-\newpage
-
-### Auction Type
-```{r var-auction-type-table}
-#| label: tbl-var-auction-type
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("111_var_auction_type")
-```
-
-[Table Note: Auction mechanism subtype for PFP contracts.]
-
-\newpage
-
-### Is Bid to Result
-```{r var-is-bid-to-result-table}
-#| label: tbl-var-is-bid-to-result
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("111_var_is_bid_to_result")
-```
-
-[Table Note: Binary indicator for Performance-Fixed-Price (PFP) auction contracts. Primary treatment variable for causal analysis.]
-
-\newpage
-
-### Is Scope of Work
-```{r var-is-scope-of-work-table}
-#| label: tbl-var-is-scope-of-work
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("111_var_is_scope_of_work")
-```
-
-[Table Note: Binary indicator for traditional Time-and-Materials (T&M) contracts.]
-
-\newpage
-
-### Brings to Closure Flag
-```{r var-brings-to-closure-flag-table}
-#| label: tbl-var-brings-to-closure-flag
-#| echo: false
-#| results: asis
-#| warning: false
-#| message: false
-#| tbl-pos: 'H'
-
-include_table("111_var_brings_to_closure_flag")
-```
-
-[Table Note: Binary indicator for contracts responsible for achieving site closure.]
-
-
-
-
-```{tikz}
-#| label: fig-ustif-process
-#| fig-cap: "USTIF Claims Assignment and Auction Mechanism"
-#| fig-align: center
-#| echo: false
-
-\usetikzlibrary{shapes.geometric, arrows.meta, positioning, calc, shadows}
-
-% Define block styles
-\tikzstyle{start} = [rectangle, rounded corners, minimum width=3cm, minimum height=1cm, text centered, draw=black, fill=red!30, drop shadow]
-\tikzstyle{process} = [rectangle, minimum width=3.5cm, minimum height=1cm, text centered, text width=3cm, draw=black, fill=blue!10, drop shadow]
-\tikzstyle{auction} = [rectangle, minimum width=3.5cm, minimum height=1cm, text centered, text width=3.5cm, draw=black, fill=green!15, drop shadow]
-\tikzstyle{decision} = [diamond, minimum width=3cm, minimum height=1cm, text centered, text width=2cm, draw=black, fill=yellow!20, drop shadow]
-\tikzstyle{callout} = [rectangle, rounded corners, minimum width=3cm, minimum height=1cm, text centered, text width=4cm, draw=gray, fill=white, dashed, font=\footnotesize\itshape]
-\tikzstyle{arrow} = [thick,->,>=stealth]
-\tikzstyle{line} = [thick,-]
-
-\begin{tikzpicture}[node distance=2cm]
-
-% --- Phase 1: Intake & Assignment ---
-\node (start) [start] {Claim Initiated / Confirmed Release};
-
-\node (adjuster) [decision, below of=start, yshift=-0.5cm] {ICF Claims Evaluator Review};
-\node (callout_adjuster) [callout, right=1cm of adjuster] {``The Judge'' \\ Application of Bulletin \#5: \\ Is site ``stalled''? Complex? \\ (Tacit Rule of Assignment)};
-\draw [dashed, gray] (adjuster) -- (callout_adjuster);
-
-% --- Path A: Normal Claim (T&M) ---
-\node (tm_neg) [process, left=2.5cm of adjuster, yshift=-2cm] {Time \& Materials (T\&M) Negotiation};
-\node (tm_work) [process, below of=tm_neg] {Remedial Work \\ (Pay-as-you-go)};
-\node (tm_end) [start, below of=tm_work] {Case Closure};
-
-% --- Path B: Auction Process (Treatment) ---
-\node (rfb) [auction, right=2.5cm of adjuster, yshift=-2cm] {RFB Development};
-\node (callout_rfb) [callout, right=0.5cm of rfb] {Defined Scope vs. Bid-to-Result \\ (Creation of Base vs. Optional Milestones)};
-\draw [dashed, gray] (rfb) -- (callout_rfb);
-
-\node (site_visit) [auction, below of=rfb] {Mandatory Pre-Bid \\ Site Meeting};
-
-\node (bids_in) [auction, below of=site_visit] {Bid Submission};
-
-\node (admin_review) [decision, below of=bids_in, yshift=-0.5cm] {Admin Review};
-\node (reject) [process, right=2cm of admin_review, fill=red!10] {Bid Rejected \\ (Non-responsive)};
-
-\node (tech_score) [auction, below of=admin_review, yshift=-0.5cm] {Technical Scoring};
-\node (callout_tech) [callout, right=0.5cm of tech_score] {Threshold Rule: \\ Must score $\ge$ 70-75\% of \\ highest tech score to advance};
-\draw [dashed, gray] (tech_score) -- (callout_tech);
-
-\node (cost_score) [auction, below of=tech_score, yshift=-0.5cm] {Cost Scoring};
-\node (callout_cost) [callout, right=0.5cm of cost_score] {Formula: \\ $(1 - \frac{Bid - Low}{Low}) \times Points$ \\ Penalty if Bid $>$ 2x Low};
-\draw [dashed, gray] (cost_score) -- (callout_cost);
-
-\node (soft_cap) [decision, below of=cost_score, yshift=-1cm] {Determine ``Reasonable \& Necessary'' Cap};
-\node (callout_cap) [callout, left=0.5cm of soft_cap] {The ``Soft Cap'': \\ USTIF sets max payout at \\ highest \textit{acceptable} bid, \\ not necessarily lowest bid.};
-\draw [dashed, gray] (soft_cap) -- (callout_cap);
-
-\node (selection) [auction, below of=soft_cap, yshift=-1cm] {Claimant Selection};
-\node (callout_select) [callout, right=0.5cm of selection] {Principal-Agent Problem: \\ Claimant chooses winner \\ from ``Acceptable'' pool. \\ USTIF pays up to Cap.};
-\draw [dashed, gray] (selection) -- (callout_select);
-
-\node (contract) [start, below of=selection] {Fixed Price Contract Executed};
-
-% --- Arrows ---
-\draw [arrow] (start) -- (adjuster);
-
-% Path A Arrows
-\draw [arrow] (adjuster) -| node[anchor=south] {Routine / Low Complexity} (tm_neg);
-\draw [arrow] (tm_neg) -- (tm_work);
-\draw [arrow] (tm_work) -- (tm_end);
-
-% Path B Arrows
-\draw [arrow] (adjuster) -| node[anchor=south] {High Complexity / Stalled} (rfb);
-\draw [arrow] (rfb) -- (site_visit);
-\draw [arrow] (site_visit) -- (bids_in);
-\draw [arrow] (bids_in) -- (admin_review);
-\draw [arrow] (admin_review) -- node[anchor=west] {Pass} (tech_score);
-\draw [arrow] (admin_review) -- node[anchor=south] {Fail} (reject);
-\draw [arrow] (tech_score) -- (cost_score);
-\draw [arrow] (cost_score) -- (soft_cap);
-\draw [arrow] (soft_cap) -- (selection);
-\draw [arrow] (selection) -- (contract);
-
-\end{tikzpicture}
-``` 
-
-
-
-
 
 # Appendix: USTIF Eligibility Checklist
 
@@ -2691,3 +1688,4 @@ kable(ustif_checklist,
 | 13-18 | \$15,000   |
 | 19-24 | \$20,000   |
 | 25-30 | \$25,000   |
+
