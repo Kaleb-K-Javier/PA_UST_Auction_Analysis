@@ -45,7 +45,8 @@ format:
 #| echo: false
 #| warning: false
 #| message: false
-
+library(readr)
+library(dplyr)
 library(knitr)
 library(stringr)
 
@@ -124,6 +125,8 @@ This section details the primary grouping variables derived from the harmonized 
 #| label: tbl-tank-status
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("001_tank_status_freq")
@@ -142,6 +145,8 @@ include_table("001_tank_status_freq")
 #| label: tbl-substance-profile
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("002_substance_counts")
 ```
@@ -159,6 +164,8 @@ include_table("002_substance_counts")
 #| label: tbl-date-diagnostics
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("003_date_defaults")
 ```
@@ -186,7 +193,8 @@ include_figure("003b_knn_imputation_diagnostics")
 \newpage
 # Component Universe
 
-This section details the raw attributes available in the 'Compounds' table. Use these tables to determine which specific attributes to 'hotcode' into binary variables.
+This section details the raw attributes available in the 'Compounds' table. These tables help map specific attributes to what the 'hotcoded' variables mean.
+We will also use  these tables to determine and build the corseined human-derired characteristics variables.
 
 
 
@@ -198,11 +206,138 @@ This section details the raw attributes available in the 'Compounds' table. Use 
 #| label: tbl-tank-release-detection
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_tank_release_detection_method")
 ```
 
-[Table Note: Identify primary detection methods.]
+
+\newpage
+
+Using @tbl-tank-release-detection the table below is how we  coarsen the relsease dection variables `release_detection_method`:
+
+
+#### Release Detection - Coarsened mapping
+
+
+
+\newpage
+
+```{r tank-release-detection-table}
+#| label: tbl-tank-release-detection-method
+#| echo: false
+#| results: asis
+#| warning: false
+#| message: false
+#| tbl-pos: 'H'
+
+library(readr)
+library(dplyr)
+library(knitr)
+library(stringr)
+library(kableExtra)
+
+# 1. Embed the ASCII data
+# We include the table grid and the specific classification notes.
+ascii_data <- "
+Component Universe: TANK RELEASE DETECTION METHOD (CLASSIFIED)
++------+----------------------------------------+-------+-----------------------------+-----------------------+
+| CODE | COMPONENT_TYPE                         |     N | METHOD CATEGORY             | REGULATION CITATION   |
++------+----------------------------------------+-------+-----------------------------+-----------------------+
+| 12H  | INTERSTITIAL MONITORING (2 WALLS)      | 13753 | Secondary Containment (IM)  | 40 CFR § 280.43(g)    |
+| 12I  | INTERSTITIAL MONITORING (LINER)        |     9 | Secondary Containment (IM)  | 40 CFR § 280.43(g)    |
+| 12L  | GROOVES MADE IN THE IMPERMEABLE PAD    |     2 | Secondary Containment (IM)  | 40 CFR § 280.43(g)    |
+| 12M  | SLOTTED PIPE ABOVE THE IMPERMEABLE PAD |     4 | Secondary Containment (IM)  | 40 CFR § 280.43(g)    |
+|      |                                        |       |                             |                       |
+| 12E  | AUTOMATIC TANK GAUGING                 | 17834 | Internal Monitoring (ATG)   | 40 CFR § 280.43(d)    |
+| 12D  | STATISTICAL INVENTORY RECONCILIATION   |  4683 | Internal Monitoring (SIR)   | 40 CFR § 280.43(h)    |
+| 12F  | MANUAL TANK GAUGING (36 HRS)           |   407 | Internal Monitoring (MTG)* | 40 CFR § 280.43(b)    |
+| 12G  | MANUAL TANK GAUGING (44 OR 58 HRS)     |   383 | Internal Monitoring (MTG)* | 40 CFR § 280.43(b)    |
+|      |                                        |       |                             |                       |
+| 12A  | MONTHLY INVENTORY CONTROL              |  3611 | Inventory Control** | 40 CFR § 280.43(a)    |
+| 12B  | ANNUAL TANK TIGHTNESS TESTING          |  2985 | Tightness Testing** | 40 CFR § 280.43(c)    |
+| 12C  | TANK TIGHTNESS TESTING (EVERY 5 YEARS) |   535 | Tightness Testing** | 40 CFR § 280.43(c)    |
+|      |                                        |       |                             |                       |
+| 12J  | GROUNDWATER MONITORING                 |    79 | External Monitoring         | 40 CFR § 280.43(f)    |
+| 12K  | VAPOR MONITORING                       |    58 | External Monitoring         | 40 CFR § 280.43(e)    |
+|      |                                        |       |                             |                       |
+| 1299 | OTHER                                  |     8 | Other/Unclassified          | 40 CFR § 280.40(a)    |
+| 12N  | NONE                                   |  2833 | Non-Compliant/Missing       | Violation § 280.40(a) |
+| 12O  | EXEMPT                                 |   953 | Exempt/Deferred             | 40 CFR § 280.10       |
++------+----------------------------------------+-------+-----------------------------+-----------------------+
+"
+
+# 2. Parse the Table
+lines <- str_split(ascii_data, "\n")[[1]]
+table_lines <- lines[str_detect(lines, "^\\|")]
+
+df <- read_delim(
+  I(table_lines), 
+  delim = "|", 
+  trim_ws = TRUE, 
+  show_col_types = FALSE
+) %>%
+  select(-1, -last_col()) %>%
+  filter(!is.na(CODE))
+
+# 3. Define Footnotes
+# These explain the asterisks (* and **) in the table body.
+# We treat the text block about Citation Logic as external analysis, not part of the table footer.
+note_1 <- "* MTG (12F/12G): Only valid for tanks <= 1,000 gallons (or up to 2,000 gallons under specific diameter conditions)."
+note_2 <- "** Inventory Control/Tightness Testing (12A/12B): Must be combined with Tightness Testing (valid only for 10 years after install) or used temporarily."
+
+# 4. Render
+kable(df, booktabs = TRUE, caption = "Component Universe: TANK RELEASE DETECTION METHOD (CLASSIFIED)") %>%
+  kableExtra::footnote(
+    general = c(note_1, note_2),
+    general_title = "Notes on Classifications: ",
+    footnote_as_chunk = TRUE
+  )
+```
+
+
+\newpage
+
+```{r release-detection-compliance-mapping}
+#| label: tbl-rd-compliance-mapping
+#| echo: false
+#| results: asis
+#| warning: false
+#| message: false
+#| tbl-cap: "Regulatory Validity Mapping: Tank Release Detection Methods by Cohort"
+
+library(tibble)
+library(dplyr)
+library(knitr)
+
+# Define the Mapping Dataframe
+compliance_map <- tribble(
+  ~Cohort, ~Compliance_Status, ~Method_Codes, ~Method_Description, ~Regulatory_Logic,
+  
+  # --- COHORT 1: 2016 Rule (Post-Oct 2015 Installs) ---
+  "2016 Rule (New Installs)", "VALID", "12H, 12I, 12L, 12M", "Interstitial Monitoring (Secondary Containment)", "Mandatory for all new installs (40 CFR § 280.41(a)(1)(i)).",
+  "2016 Rule (New Installs)", "INVALID", "12E, 12D, 12J, 12K", "Internal/External Monitoring (Single Wall)", "Prohibited for new installs; Secondary Containment required.",
+  "2016 Rule (New Installs)", "INVALID", "12A + 12B/12C", "Inventory Control + Tightness Testing", "Prohibited for new installs.",
+  
+  # --- COHORT 2: 1998 Rule (Legacy/Existing Tanks) ---
+  "1998 Rule (Legacy)", "VALID", "12H, 12I", "Interstitial Monitoring", "Valid indefinitely (Gold Standard).",
+  "1998 Rule (Legacy)", "VALID", "12E", "Automatic Tank Gauging (ATG)", "Valid if capable of detecting 0.2 gph leak rate.",
+  "1998 Rule (Legacy)", "VALID", "12D", "Statistical Inventory Reconciliation (SIR)", "Valid if quantitative results meet 0.2 gph threshold.",
+  "1998 Rule (Legacy)", "CONDITIONAL", "12J, 12K", "Groundwater / Vapor Monitoring", "Valid only if site assessment confirms porous soil/water table suitability. Cannot be added to new sites.",
+  "1998 Rule (Legacy)", "CONDITIONAL", "12F, 12G", "Manual Tank Gauging (MTG)", "Valid ONLY for tanks <= 1000 gal (or <= 2000 gal w/ precise dimensions).",
+  "1998 Rule (Legacy)", "SUNSET/EXPIRED", "12A + 12B", "Inventory Control + Annual TTT", "Valid only for 10 years after installation. As of 2026, all eligible tanks have exceeded this window.",
+  "1998 Rule (Legacy)", "INVALID", "12A (Solo)", "Inventory Control (Solo)", "Never valid as a standalone method (must pair with TTT or ATG)."
+)
+
+# Render
+kable(compliance_map, booktabs = TRUE) %>%
+  kableExtra::column_spec(1, bold = TRUE) %>%
+  kableExtra::collapse_rows(columns = 1, valign = "top") %>%
+    kable_styling(latex_options = c("scale_down", "hold_position"))
+
+```
+
 
 \newpage
 
@@ -212,11 +347,95 @@ include_table("004_comp_tank_release_detection_method")
 #| label: tbl-tank-construction
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_tank_construction")
 ```
 
-[Table Note: Distinguish between Steel, Fiberglass, and Composite.]
+\newpage
+
+
+#### Tank Construction - Coarsened mapping
+
+
+Using @tbl-tank-construction the table below is how we  coarsen the construction variables `construction_type`:
+
+
+```{r tank-release-detection-table}
+#| label: tbl-tank-construction-mapped
+#| echo: false
+#| results: asis
+#| warning: false
+#| message: false
+#| tbl-pos: 'H'
+
+library(readr)
+library(dplyr)
+library(knitr)
+library(stringr)
+
+# 1. Embed the ASCII table directly as a text block
+ascii_data <- "
+Component Universe: TANK CONSTRUCTION (CLASSIFIED)
++------+--------------------------------------------------------+------+------------------------+---------------------------------+
+| CODE | COMPONENT_TYPE                                         |    N | Construction | REGULATION CITATION             |
++------+--------------------------------------------------------+------+------------------------+---------------------------------+
+| 1D   | UNPROTECTED STEEL (DOUBLE WALL)                        |   75 | Secondary Containment  | 40 CFR § 280.43(g)              |
+| 1F   | FIBERGLASS (DOUBLE WALL)                               | 8272 | Secondary Containment  | 40 CFR § 280.43(g)              |
+| 1G   | STEEL W/PLASTIC OR FIBERGLASS JACKET (DOUBLE WALL)     | 5378 | Secondary Containment  | 40 CFR § 280.43(g)              |
+| 1O   | CATHODICALLY PROTECTED DOUBLE WALL STEEL (GALVANIC)    | 3100 | Secondary Containment  | 40 CFR § 280.43(g)              |
+| 1V   | STEEL W/PLASTIC OR FRP JACKET W/ ANODES (DOUBLE WALL)  |  445 | Secondary Containment  | 40 CFR § 280.43(g)              |
+|      |                                                        |      |                        |                                 |
+| 1A   | UNPROTECTED STEEL (SINGLE WALL)                        | 5368 | Single Wall (Legacy)   | 40 CFR § 280.41(a)(1)           |
+| 1B   | CATHODICALLY PROTECTED STEEL (GALVANIC)                | 7094 | Single Wall (Legacy)   | 40 CFR § 280.41(a)(1)           |
+| 1C   | CATHODICALLY PROTECTED STEEL (IMPRESSED CURRENT)       | 2284 | Single Wall (Legacy)   | 40 CFR § 280.41(a)(1)           |
+| 1E   | FIBERGLASS (SINGLE WALL)                               | 8647 | Single Wall (Legacy)   | 40 CFR § 280.41(a)(1)           |
+| 1H   | STEEL W/FRP COATING (ACT 100 OR EQUIV) (SINGLE WALL)   |  961 | Single Wall (Legacy)   | 40 CFR § 280.41(a)(1)           |
+| 1I   | STEEL W/LINED INTERIOR                                 |  750 | Single Wall (Legacy)   | 40 CFR § 280.41(a)(1)           |
+| 1J   | CONCRETE                                               |   31 | Single Wall (Legacy)   | 40 CFR § 280.41(a)(1)           |
+| 1P   | CATHODICALLY PROTECTED STEEL WITH LINER                |  572 | Single Wall (Legacy)* | 40 CFR § 280.41(a)(1)           |
+| 1W   | STEEL W/FRP COATING W/ ANODES (SINGLE WALL)            |   15 | Single Wall (Legacy)   | 40 CFR § 280.41(a)(1)           |
+|      |                                                        |      |                        |                                 |
+| 188  | OTHER (COMPLIANT)                                      |   15 | Unknown/Other          | 40 CFR § 280.40(a)              |
+| 199  | OTHER                                                  |   69 | Unknown/Other          | 40 CFR § 280.40(a)              |
+| 1K   | BOTTOM MODIFICATION                                    |    1 | Unknown/Other          | 40 CFR § 280.40(a)              |
+| 1N   | UNKNOWN                                                |  194 | Unknown/Other          | 40 CFR § 280.40(a)              |
++------+--------------------------------------------------------+------+------------------------+---------------------------------+
+Note: Codes 1I and 1P (Lined Interior) generally indicate internal lining repairs (280.21(b)(1)), not secondary containment bladders.
+"
+
+# 2. Process the text
+# Split into lines
+lines <- str_split(ascii_data, "\n")[[1]]
+
+# Filter for rows that actually contain data (start with a pipe '|')
+# This automatically drops the "+---+" separators and the "Note:" line
+table_lines <- lines[str_detect(lines, "^\\|")]
+
+# 3. Create DataFrame
+df <- read_delim(
+  I(table_lines), 
+  delim = "|", 
+  trim_ws = TRUE, 
+  show_col_types = FALSE
+) %>%
+  # Remove artifact columns (first and last are empty due to outer pipes)
+  select(-1, -last_col()) %>%
+  # Remove the blank spacer rows (where CODE is empty/NA)
+  filter(!is.na(CODE))
+
+# 4. Render with Footer
+# We extract the note explicitly since it was dropped during the filter step
+footer_text <- "Codes 1I and 1P (Lined Interior) generally indicate internal lining repairs (280.21(b)(1)), not secondary containment bladders."
+
+kable(df, booktabs = TRUE, caption = "Component Universe: TANK CONSTRUCTION (CLASSIFIED)") %>%
+  kable_styling(latex_options = c("scale_down", "hold_position")) %>%
+
+  kableExtra::footnote(general = footer_text, general_title = "Note: ")
+
+```
+
 
 \newpage
 
@@ -228,11 +447,91 @@ include_table("004_comp_tank_construction")
 #| label: tbl-ug-piping-construction
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_ug_piping_construction")
 ```
 
 [Table Note: Key variable for leak risk (e.g., Single Wall vs Double Wall, Galvanized vs Fiberglass).]
+
+#### Piping - Coarsend Mapping
+
+```{r piping-construction-compliance}
+#| label: tbl-piping-compliance
+#| echo: false
+#| results: asis
+#| warning: false
+#| message: false
+#| tbl-pos: 'H'
+#| tbl-cap: "Component Universe: Piping Construction & Regulatory Compliance (40 CFR § 280.42)"
+
+library(readr)
+library(dplyr)
+library(knitr)
+library(stringr)
+library(kableExtra)
+
+# 1. Unified ASCII Data
+# Combines the counts (N), specific codes, and the regulatory logic into one view.
+ascii_data <- "
++------------------------------------------+------+----------------------------------+-------+------------------------------------------+
+| COARSENED_CATEGORY                       | CODE | COMPONENT_TYPE                   |     N | REGULATORY_STATUS                        |
++------------------------------------------+------+----------------------------------+-------+------------------------------------------+
+| SECONDARY CONTAINMENT                    | 2I   | Double wall, metallic primary    |   490 | Valid for All Cohorts (Post-2016 & Legacy)|
+| (Required for Post-2016 Installs)        | 2J   | Double wall, rigid (FRP) primary |  1623 | Valid for All Cohorts (Post-2016 & Legacy)|
+|         | 2K   | Double wall, flexible primary    |  2756 | Valid for All Cohorts (Post-2016 & Legacy)|
+|                                          | 2L   | TRENCH LINER                     |    16 | Valid (Functional Secondary Containment) |
+|                                          | 2M   | JACKETED                         |    15 | Valid for All Cohorts (Post-2016 & Legacy)|
+|                                          |      |                                  |       |                                          |
+| SINGLE WALL                              | 2A   | BARE STEEL                       |  5870 | Legacy Only (High Risk - Req Cathodic)   |
+| (Legacy Only - Pre-2016)                 | 2B   | CP METALLIC                      |  2137 | Legacy Only (Req 3-yr Cathodic Test)     |
+|  | 2C   | COPPER                           |   213 | Legacy Only (Rare/Generator Use)         |
+|                                          | 2D   | FIBERGLASS                       |  6331 | Legacy Only (Standard Pre-2016)          |
+|                                          | 2E   | FLEXIBLE NON-METALLIC            |   488 | Legacy Only (Standard Pre-2016)          |
+|                                          |      |                                  |       |                                          |
+| OTHER / UNKNOWN                          | 288  | OTHER (COMPLIANT)                |    31 | Unclassified - Likely Specialized        |
+|                                          | 299  | OTHER                            |    39 | Unclassified                             |
+|                                          | 2F   | UNKNOWN                          |   218 | Data Gap                                 |
+|                                          | 2G   | NONE                             |   793 | No Piping / Direct Fill / Gravity        |
+|                                          | 2H   | MODIFICATION OF PIPING           |    15 | Maintenance Record (Not Construction)    |
++------------------------------------------+------+----------------------------------+-------+------------------------------------------+
+"
+
+# 2. Parse the Table
+# We use the same 'stream' technique, filtering for pipe delimiters
+lines <- str_split(ascii_data, "\n")[[1]]
+table_lines <- lines[str_detect(lines, "^\\|")]
+
+df <- read_delim(
+  I(table_lines), 
+  delim = "|", 
+  trim_ws = TRUE, 
+  show_col_types = FALSE
+) %>%
+  select(-1, -last_col()) %>%
+  filter(!is.na(CODE)) %>%
+  # Fill the 'COARSENED_CATEGORY' down so it doesn't just appear on the first row of the group
+  tidyr::fill(COARSENED_CATEGORY, .direction = "down")
+
+# 3. Define Footnotes for Context
+# Extracted from your Regulatory Cohort and Suction Piping logic
+notes <- c(
+  "Post-2016 Rule: Installs after April 11, 2016 must use Secondary Containment with Interstitial Monitoring (IM).",
+  "Safe Suction Exception: Single Wall piping (2A-2E) is exempt from release detection if sloped back to the tank with only one check valve.",
+  "ALLD Requirement: Pressurized piping (Legacy or New) requires an Automatic Line Leak Detector."
+)
+
+# 4. Render
+kable(df, booktabs = TRUE, longtable = FALSE)%>%
+  # Group the first column to visually merge the categories
+  collapse_rows(columns = 1, valign = "top") %>%
+  # Add the regulatory footnotes
+  footnote(number = notes, footnote_as_chunk = TRUE) %>%
+  # styling for PDF fit
+  kable_styling(latex_options = c("scale_down"))
+```
+
 
 \newpage
 
@@ -242,11 +541,80 @@ include_table("004_comp_ug_piping_construction")
 #| label: tbl-ug-single-inner-wall
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_ug_single_inner_wall_piping")
 ```
 
 [Table Note: [Placeholder: Description of single inner wall piping characteristics.]]
+
+#### Underground Piping: Single Inner Wall Coarsened
+
+```{r inner-piping-material-compliance}
+#| label: tbl-inner-piping-material
+#| echo: false
+#| results: asis
+#| warning: false
+#| message: false
+#| tbl-pos: 'H'
+#| tbl-cap: "Component Universe: Primary Piping Material & Corrosion Susceptibility"
+
+library(readr)
+library(dplyr)
+library(knitr)
+library(stringr)
+library(kableExtra)
+
+# 1. Unified ASCII Data: Material + Corrosion Risk Mapping
+ascii_data <- "
++------------------------------------------+-------+-----------------------+-------+------------------------------------------+
+| COARSENED_CATEGORY                       | CODE  | COMPONENT_TYPE        |     N | REGULATORY_STATUS                        |
++------------------------------------------+-------+-----------------------+-------+------------------------------------------+
+| NON-CORRODIBLE                           | 28E   | FLEX                  | 12507 | Modern Standard (Inherently Safe)        |
+| (Modern Standard - No CP Needed)         | 28D   | FRP                   |  8859 | Modern Standard (Inherently Safe)        |
+|                                          |       |                       |       |                                          |
+| METALLIC / CORRODIBLE                    | 28A   | BARE STEEL            |   465 | High Risk (Requires CP or Isolation)     |
+| (Legacy - Maintenance Required)          | 28B   | CP PROTECTED          |   712 | High Risk (Requires 3-Year CP Testing)   |
+|                                          | 28C   | COPPER                |   167 | Legacy (Often generator/heating oil)     |
+|                                          | 28I   | STAINLESS STEEL       |    47 | Low Risk (Corrosion Resistant Metal)* |
+|                                          |       |                       |       |                                          |
+| OTHER / EXEMPT                           | 28G   | NO DISPENSING PIPING  |   373 | Exempt (Suction/Gravity/Waste Oil)       |
+|                                          | 2889  | OTHER                 |    34 | Unclassified                             |
+|                                          | 28F   | UNKNOWN               |    10 | Data Gap                                 |
++------------------------------------------+-------+-----------------------+-------+------------------------------------------+
+"
+
+# 2. Parse the Table
+lines <- str_split(ascii_data, "\n")[[1]]
+table_lines <- lines[str_detect(lines, "^\\|")]
+
+df <- read_delim(
+  I(table_lines), 
+  delim = "|", 
+  trim_ws = TRUE, 
+  show_col_types = FALSE
+) %>%
+  select(-1, -last_col()) %>%
+  filter(!is.na(CODE)) %>%
+  # Fill the Category column down for visual grouping
+  tidyr::fill(COARSENED_CATEGORY, .direction = "down")
+
+# 3. Define Footnotes
+notes <- c(
+  "Non-Corrodible: Fiberglass (FRP) and Flexible piping (Flex) do not rust and require no cathodic protection maintenance.",
+  "Legacy/Metallic: Steel and Copper piping must be cathodically protected (impressed current or galvanic) and tested every 3 years (40 CFR 280.31).",
+  "*Stainless Steel (28I): While metallic, stainless steel is often resistant enough to bypass CP requirements depending on soil conditions, but is rare in general retail use."
+)
+
+# 4. Render
+kable(df, booktabs = TRUE, longtable = FALSE)%>%
+  collapse_rows(columns = 1, valign = "top") %>%
+  footnote(number = notes, footnote_as_chunk = TRUE) %>%
+  kable_styling(latex_options = c("scale_down"))
+```
+
+  **Component Definition:** This variable describes the material composition of the **primary** product-carrying pipe (the inner wall), which determines the system's susceptibility to corrosion and whether Cathodic Protection (CP) maintenance is legally required.
 
 \newpage
 
@@ -256,11 +624,91 @@ include_table("004_comp_ug_single_inner_wall_piping")
 #| label: tbl-ug-outer-wall
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_ug_outer_wall_piping")
 ```
 
 [Table Note: [Placeholder: Description of outer wall piping characteristics.]]
+
+\newpage
+
+```{r outer-piping-material-compliance-fixed}
+#| label: tbl-outer-piping-fixed
+#| echo: false
+#| results: asis
+#| warning: false
+#| message: false
+#| tbl-pos: 'H'
+#| tbl-cap: "Component Universe: Secondary Containment (Outer Wall) Material"
+
+library(readr)
+library(dplyr)
+library(knitr)
+library(stringr)
+library(kableExtra)
+
+# 1. Define Data with Explicit Mappings
+ascii_data <- "
++------------------------------------------+-------+-------------------------------------+-------+----------------------------------------------+
+| COARSENED_CATEGORY                       | CODE  | COMPONENT_TYPE                      |     N | REGULATORY_STATUS                            |
++------------------------------------------+-------+-------------------------------------+-------+----------------------------------------------+
+| MODERN SECONDARY CONTAINMENT             | 29E   | FLEX, OUTER                         | 12227 | Standard Compliant (Non-Corrodible)          |
+| MODERN SECONDARY CONTAINMENT             | 29D   | FRP, OUTER                          |  3985 | Standard Compliant (Non-Corrodible)          |
+| MODERN SECONDARY CONTAINMENT             | 29I   | POLY-ENCASED STAINLESS STEEL, OUTER |    19 | Compliant (Specialized)                      |
+| MODERN SECONDARY CONTAINMENT             | 2999  | OTHER, OUTER                        |   263 | Likely Compliant (Non-Standard Material)     |
+|                                          |       |                                     |       |                                              |
+| NO SECONDARY CONTAINMENT                 | 29N   | NONE                                |  6295 | Single Wall System (Legacy Only)             |
+|                                          |       |                                     |       |                                              |
+| METALLIC SECONDARY                       | 29A   | BARE STEEL, OUTER                   |   204 | High Risk (Outer Wall Requires CP)           |
+| METALLIC SECONDARY                       | 29B   | CP PROTECTED, OUTER                 |    51 | High Risk (Requires 3-Year Testing)          |
+|                                          |       |                                     |       |                                              |
+| UNKNOWN / DATA GAP                       | 29F   | UNKNOWN, OUTER                      |    14 | Data Gap                                     |
++------------------------------------------+-------+-------------------------------------+-------+----------------------------------------------+
+"
+
+# 2. Process Data
+lines <- str_split(ascii_data, "\n")[[1]]
+table_lines <- lines[str_detect(lines, "^\\|")]
+
+df <- read_delim(
+  I(table_lines), 
+  delim = "|", 
+  trim_ws = TRUE, 
+  show_col_types = FALSE
+) %>%
+  select(-1, -last_col()) %>%
+  filter(!is.na(CODE))
+
+# 3. Render with Explicit Widths + Adjustbox Scaling
+kable(df, booktabs = TRUE, longtable = FALSE) %>% 
+  # A. Define Column Widths to Force Text Wrapping (Prevents Overlap)
+  column_spec(1, width = "3.5cm", bold = TRUE) %>%  # Category: Bold & wide enough to read
+  column_spec(2, width = "1.5cm") %>%               # Code: Narrow
+  column_spec(3, width = "4cm") %>%                 # Type: Wraps if long
+  column_spec(4, width = "1cm") %>%                 # N: Narrow
+  column_spec(5, width = "4cm") %>%                 # Status: Wraps long descriptions
+  
+  # B. Add Visual Separators
+  row_spec(0, bold = TRUE) %>%                      # Bold Header
+  
+  # C. Scale Down to Fit Page
+  kable_styling(latex_options = c("scale_down", "hold_position", "striped")) %>%
+  
+  # D. Add Footnotes
+  footnote(
+    number = c(
+      "None (29N): Indicates Single Wall system (Legacy).",
+      "Metallic Outer: Requires separate cathodic protection."
+    ),
+    footnote_as_chunk = TRUE
+  )
+
+```
+
+**Component Definition:** This variable identifies the material of the secondary containment layer (the outer tube in a double-walled system) which serves to capture leaks from the primary pipe and create the interstitial space necessary for leak detection monitoring.
+
 
 \newpage
 
@@ -270,6 +718,8 @@ include_table("004_comp_ug_outer_wall_piping")
 #| label: tbl-ag-piping-corrosion
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_ag_piping_construction_corrosion_prot")
 ```
@@ -284,6 +734,8 @@ include_table("004_comp_ag_piping_construction_corrosion_prot")
 #| label: tbl-pipe-release-detection
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_pipe_release_detection_method")
 ```
@@ -298,6 +750,8 @@ include_table("004_comp_pipe_release_detection_method")
 #| label: tbl-line-leak-detector
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_line_leak_detector_shuts_off_pump")
 ```
@@ -312,6 +766,8 @@ include_table("004_comp_line_leak_detector_shuts_off_pump")
 #| label: tbl-secondary-containment
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_ust_total_secondarily_contained")
 ```
@@ -328,6 +784,8 @@ include_table("004_comp_ust_total_secondarily_contained")
 #| label: tbl-registration-certificate
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_registration_certificate")
 ```
@@ -338,6 +796,8 @@ include_table("004_comp_registration_certificate")
 #| label: tbl-fire-marshal-permit
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_fire_marshal_permit")
 ```
@@ -352,6 +812,8 @@ include_table("004_comp_fire_marshal_permit")
 #| label: tbl-spill-prevention
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_spill_prevention")
 ```
@@ -362,6 +824,8 @@ include_table("004_comp_spill_prevention")
 #| label: tbl-overfill-prevention
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_overfill_prevention")
 ```
@@ -376,6 +840,8 @@ include_table("004_comp_overfill_prevention")
 #| label: tbl-vapor-recovery
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_vapor_recovery")
 ```
@@ -386,6 +852,8 @@ include_table("004_comp_vapor_recovery")
 #| label: tbl-stage-i-vapor-recovery
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_stage_i_vapor_recovery")
 ```
@@ -396,6 +864,8 @@ include_table("004_comp_stage_i_vapor_recovery")
 #| label: tbl-stage-ii-vapor-recovery
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_stage_ii_vapor_recovery")
 ```
@@ -410,6 +880,8 @@ include_table("004_comp_stage_ii_vapor_recovery")
 #| label: tbl-tank-top-containment
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_tank_top_containment_sumps")
 ```
@@ -420,6 +892,8 @@ include_table("004_comp_tank_top_containment_sumps")
 #| label: tbl-under-dispenser-containment
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_under_dispenser_containment")
 ```
@@ -436,6 +910,8 @@ include_table("004_comp_under_dispenser_containment")
 #| label: tbl-piping-flexible-connectors
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_piping_flexible_connectors")
 ```
@@ -446,6 +922,8 @@ include_table("004_comp_piping_flexible_connectors")
 #| label: tbl-flex-tank-end
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_flex_tank_end")
 ```
@@ -456,6 +934,8 @@ include_table("004_comp_flex_tank_end")
 #| label: tbl-flex-dispenser-end
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_flex_dispenser_end")
 ```
@@ -470,6 +950,8 @@ include_table("004_comp_flex_dispenser_end")
 #| label: tbl-pump-delivery-system
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_pump_delivery_system")
 ```
@@ -480,6 +962,8 @@ include_table("004_comp_pump_delivery_system")
 #| label: tbl-emergency-generator
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_emergency_generator")
 ```
@@ -494,6 +978,8 @@ include_table("004_comp_emergency_generator")
 #| label: tbl-na-components
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_na")
 ```
@@ -504,6 +990,8 @@ include_table("004_comp_na")
 #| label: tbl-tank-upgrade
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("004_comp_tank_upgrade")
 ```
@@ -524,6 +1012,8 @@ This section characterizes facility ownership structure, business model classifi
 #| label: tbl-business-model
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("005_business_model_counts")
 ```
@@ -540,6 +1030,8 @@ include_table("005_business_model_counts")
 #| label: tbl-owner-size
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("006_owner_size_class_freq")
 ```
@@ -556,6 +1048,8 @@ include_table("006_owner_size_class_freq")
 #| label: tbl-owner-sector
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("007_owner_sector_freq")
 ```
@@ -572,6 +1066,8 @@ include_table("007_owner_sector_freq")
 #| label: tbl-facility-status
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("008_facility_status_freq")
 ```
@@ -588,6 +1084,8 @@ include_table("008_facility_status_freq")
 #| label: tbl-owner-business-crosstab
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("009_owner_size_vs_business_crosstab")
 ```
@@ -604,6 +1102,8 @@ include_table("009_owner_size_vs_business_crosstab")
 #| label: tbl-closure-rates
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 include_table("010_closure_rates_by_facility_type")
 ```
@@ -925,6 +1425,8 @@ This section provides a summary of the USTIF claims and remediation contracts, a
 #| label: tbl-claims-status
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("101_claims_status_summary")
@@ -959,6 +1461,8 @@ include_figure("105_claims_cost_distribution_real")
 #| label: tbl-contract-types
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("106_contract_auction_types")
@@ -993,6 +1497,8 @@ include_figure("108_contract_value_real_boxplot")
 #| label: tbl-var-claim-status
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("110_var_claim_status")
@@ -1007,6 +1513,8 @@ include_table("110_var_claim_status")
 #| label: tbl-var-dep-region
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("110_var_dep_region")
@@ -1021,6 +1529,8 @@ include_table("110_var_dep_region")
 #| label: tbl-var-county
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("110_var_county")
@@ -1035,6 +1545,8 @@ include_table("110_var_county")
 #| label: tbl-var-location-desc
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("110_var_location_desc")
@@ -1049,6 +1561,8 @@ include_table("110_var_location_desc")
 #| label: tbl-var-products
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("110_var_products")
@@ -1063,6 +1577,8 @@ include_table("110_var_products")
 #| label: tbl-var-is-closed
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("110_var_is_closed")
@@ -1077,6 +1593,8 @@ include_table("110_var_is_closed")
 #| label: tbl-var-is-open
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("110_var_is_open")
@@ -1093,6 +1611,8 @@ include_table("110_var_is_open")
 #| label: tbl-var-adjuster
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("111_var_adjuster")
@@ -1107,6 +1627,8 @@ include_table("111_var_adjuster")
 #| label: tbl-var-consultant
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("111_var_consultant")
@@ -1121,6 +1643,8 @@ include_table("111_var_consultant")
 #| label: tbl-var-brings-to-closure
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("111_var_brings_to_closure")
@@ -1135,6 +1659,8 @@ include_table("111_var_brings_to_closure")
 #| label: tbl-var-contract-category
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("111_var_contract_category")
@@ -1149,6 +1675,8 @@ include_table("111_var_contract_category")
 #| label: tbl-var-bid-type
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("111_var_bid_type")
@@ -1163,6 +1691,8 @@ include_table("111_var_bid_type")
 #| label: tbl-var-contract-type-raw
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("111_var_contract_type_raw")
@@ -1177,6 +1707,8 @@ include_table("111_var_contract_type_raw")
 #| label: tbl-var-auction-type
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("111_var_auction_type")
@@ -1191,6 +1723,8 @@ include_table("111_var_auction_type")
 #| label: tbl-var-is-bid-to-result
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("111_var_is_bid_to_result")
@@ -1205,6 +1739,8 @@ include_table("111_var_is_bid_to_result")
 #| label: tbl-var-is-scope-of-work
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("111_var_is_scope_of_work")
@@ -1219,6 +1755,8 @@ include_table("111_var_is_scope_of_work")
 #| label: tbl-var-brings-to-closure-flag
 #| echo: false
 #| results: asis
+#| warning: false
+#| message: false
 #| tbl-pos: 'H'
 
 include_table("111_var_brings_to_closure_flag")
