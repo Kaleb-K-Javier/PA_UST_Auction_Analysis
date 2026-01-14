@@ -6,3 +6,5 @@
 
 # Ignore R History
 .Rhistory
+
+!output/component_mapping/mappings/

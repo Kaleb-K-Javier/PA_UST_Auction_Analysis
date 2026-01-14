@@ -120,36 +120,40 @@ include_figure <- function(filename_base) {
 
 library(readr)
 library(kableExtra)
-
-render_compliance_table <- function(df, caption, footnotes = NULL, export_path = NULL) {
+render_compliance_table <- function(df, caption, footnotes = NULL, export_filename = NULL) {
   
-  # --- NEW: Export Logic ---
-  # If a path is provided, save the clean data immediately for ETL use
-  if (!is.null(export_path)) {
-    # Ensure the directory exists (optional, but good practice)
-    dir_name <- dirname(export_path)
-    if (!dir.exists(dir_name) && dir_name != ".") {
-      dir.create(dir_name, recursive = TRUE)
+  # --- EXPORT LOGIC ---
+  # Saves clean data to: PA_UST_Auction_Analysis/output/component_mapping/mappings/
+  # Prevents saving in the QMD directory by stepping up one level ("..")
+  if (!is.null(export_filename)) {
+    
+    # Define target path relative to the QMD location (qmd/ -> output/)
+    target_dir <- file.path("..", "output", "component_mapping", "mappings")
+    
+    # Recursively create directory structure if it doesn't exist
+    if (!dir.exists(target_dir)) {
+      dir.create(target_dir, recursive = TRUE)
     }
     
-    # Write to CSV (using readr for better handling of special chars)
-    readr::write_csv(df, export_path)
-    message(paste("Exported data for ETL to:", export_path))
+    # Construct full file path
+    full_path <- file.path(target_dir, export_filename)
+    
+    # Write CSV using readr
+    readr::write_csv(df, full_path)
+    message(sprintf("Exported: %s", full_path))
   }
   
-  # --- Existing Rendering Logic (Updated for Page Fit) ---
+  # --- RENDERING LOGIC ---
   tbl <- kable(df, 
                booktabs = TRUE, 
                caption = caption,
                escape = FALSE,
                longtable = TRUE) %>% 
     kable_styling(
-      # 'scale_down' removed to allow longtable to break pages correctly
       latex_options = c("repeat_header", "hold_position"), 
       font_size = 8,
       full_width = TRUE 
     ) %>%
-    # Column widths optimized for standard 8.5x11 page with 0.5" margins
     column_spec(1, width = "0.9cm") %>%  # CODE
     column_spec(2, width = "4.0cm") %>%  # COMPONENT_TYPE
     column_spec(3, width = "0.8cm") %>%  # N
