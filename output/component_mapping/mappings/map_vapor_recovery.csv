@@ -1,0 +1,5 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+11A,STAGE I INSTALLED,3693,Stage I Only,Clean Air Act (not 40 CFR 280),42 U.S.C. §7511a(b)(3),25 Pa. Code Ch. 129,§129.82
+11B,STAGE II INSTALLED,89,Stage II Only,Clean Air Act (not 40 CFR 280),42 U.S.C. §7511a(b)(3),25 Pa. Code Ch. 129,§129.82
+11C,STAGE I AND STAGE II INSTALLED,774,Stage I + II,Clean Air Act (not 40 CFR 280),42 U.S.C. §7511a(b)(3),25 Pa. Code Ch. 129,§129.82
+11D,NONE,4494,No Vapor Recovery,May be acceptable - check area,Air quality area-dependent,Check county status,§129.82

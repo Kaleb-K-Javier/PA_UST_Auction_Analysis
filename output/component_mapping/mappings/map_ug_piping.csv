@@ -1,0 +1,20 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+2I,"Double wall, metallic primary",490,Secondary Containment,Compliant (All Vintages),§280.20(b); §280.43(g),Compliant,§245.422(a)
+2J,"Double wall, rigid (FRP) primary",1623,Secondary Containment,Compliant (All Vintages),§280.20(b)(1); UL 971,Compliant,§245.422(a)
+2K,"Double wall, flexible primary",2756,Secondary Containment,Compliant (All Vintages),§280.20(b)(1),Compliant,§245.422(a)
+2L,TRENCH LINER,16,Secondary Containment,Compliant (All Vintages),§280.43(g),Compliant,§245.422(a)
+2M,JACKETED,15,Secondary Containment,Compliant (All Vintages),§280.20(b),Compliant,§245.422(a)
+2A,BARE STEEL,5870,Single Wall (Legacy),Legacy: HIGH RISK,§280.21(c) req CP upgrade,Legacy: HIGH RISK,§245.422(b)
+2A,BARE STEEL,NA,Single Wall (Legacy),Post-4/11/16: NON-COMPLIANT,§280.20 intro para,Post-12/22/18: NON-COMPLIANT,§245.422(a)
+2B,"CATHODICALLY PROTECTED, METALLIC",2137,Single Wall (Legacy),Legacy: Compliant,§280.20(b)(2); 3-yr CP test,Legacy: Compliant,§245.422(b); §245.432
+2B,"CATHODICALLY PROTECTED, METALLIC",NA,Single Wall (Legacy),Post-4/11/16: NON-COMPLIANT,§280.20 intro para,Post-12/22/18: NON-COMPLIANT,§245.422(a)
+2C,COPPER,213,Single Wall (Legacy),Legacy: Conditional,§280.20(b)(3) site assess,Legacy: Conditional,§245.422(b)
+2D,FIBERGLASS,6331,Single Wall (Legacy),Legacy: Compliant,§280.20(b)(1); UL 971,Legacy: Compliant,§245.422(b)
+2D,FIBERGLASS,NA,Single Wall (Legacy),Post-4/11/16: NON-COMPLIANT,§280.20 intro para,Post-12/22/18: NON-COMPLIANT,§245.422(a)
+2E,FLEXIBLE NON-METALLIC,488,Single Wall (Legacy),Legacy: Compliant,§280.20(b)(1),Legacy: Compliant,§245.422(b)
+2E,FLEXIBLE NON-METALLIC,NA,Single Wall (Legacy),Post-4/11/16: NON-COMPLIANT,§280.20 intro para,Post-12/22/18: NON-COMPLIANT,§245.422(a)
+288,OTHER (COMPLIANT),31,Other/Unknown,Case-by-Case,§280.20(b)(4),Case-by-Case,§245.422
+299,OTHER,39,Other/Unknown,Presumed Non-Compliant,§280.20(b),Presumed Non-Compliant,§245.422
+2F,UNKNOWN,218,Data Gap,UNKNOWN - Verify,N/A,UNKNOWN - Verify,N/A
+2G,NONE,793,No Piping,N/A - Direct Fill/Gravity,§280.41(b) exemption,N/A,§245.445 exemption
+2H,MODIFICATION OF PIPING,15,Maintenance Record,Repair Record Only,§280.33(d),Repair Record Only,§245.433

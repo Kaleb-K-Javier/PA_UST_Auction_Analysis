@@ -1,0 +1,15 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+3I,DOUBLE WALL METALLIC PRIMARY,19,Secondary Containment,Compliant,§280.20(b),Compliant,§245.422(a)
+3J,DOUBLE WALL RIGID (FRP) PRIMARY,11,Secondary Containment,Compliant,§280.20(b)(1),Compliant,§245.422(a)
+3K,DOUBLE WALL FLEXIBLE PRIMARY,8,Secondary Containment,Compliant,§280.20(b)(1),Compliant,§245.422(a)
+3A,CARBON STEEL,615,Single Wall (AG),AG: Not subject to §280.20(b),AG piping different reqs,AG: PA Ch. 245 Subchap F,§245.501-545
+3B,"CATHODICALLY PROTECTED, METALLIC",72,Single Wall (CP),AG: Best Practice,AG piping different reqs,AG: Best Practice,§245.501-545
+3C,COPPER,30,Single Wall (AG),AG: Acceptable,AG piping different reqs,AG: Acceptable,§245.501-545
+3D,FIBERGLASS,40,Single Wall (AG),AG: Non-corrodible,AG piping different reqs,AG: Acceptable,§245.501-545
+3E,FLEXIBLE NON-METALLIC,29,Single Wall (AG),AG: Non-corrodible,AG piping different reqs,AG: Acceptable,§245.501-545
+3F,PVC,10,Single Wall (AG),AG: Non-corrodible,AG piping different reqs,AG: Acceptable,§245.501-545
+3L,STAINLESS STEEL,9,Single Wall (AG),AG: Corrosion resistant,AG piping different reqs,AG: Acceptable,§245.501-545
+388,OTHER (COMPLIANT),156,Other/Unknown,Case-by-Case,N/A,Case-by-Case,§245.501-545
+399,OTHER,21,Other/Unknown,Case-by-Case,N/A,Case-by-Case,§245.501-545
+3G,NONE,448,No AG Piping,N/A,N/A,N/A,N/A
+3H,PIPING MODIFICATION,5,Maintenance Record,Repair Record Only,§280.33,Repair Record,§245.433

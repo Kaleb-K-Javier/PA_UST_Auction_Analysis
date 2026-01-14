@@ -1,0 +1,8 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+4C,PRESSURE,25845,Pressurized,Requires: ALLD + LTT or IM,§280.41(b)(1)(i); §280.44(a),Requires ALLD,§245.445(2)
+4C,PRESSURE,NA,Pressurized,Post-4/11/16: ALLD + IM,§280.41(b)(2)(i),Post-12/22/18: + IM,§245.445(1)
+4A,SUCTION: CHECK VALVE AT PUMP,11641,Suction (Safe Suction Eligible),May qualify Safe Suction,§280.41(b)(1)(ii)(C)-(D),May qualify,§245.445(3)
+4B,SUCTION: CHECK VALVE AT TANK,3899,Suction (NOT Safe Suction),Does NOT meet Safe Suction,Fails §280.41(b)(1)(ii)(D),Does NOT meet,§245.445(3)
+4B,SUCTION: CHECK VALVE AT TANK,NA,Suction (NOT Safe Suction),Requires: LTT every 3 yrs OR monthly,§280.41(b)(1)(ii),LTT or monthly,§245.445(3)
+4D,GRAVITY FED,201,Gravity,No pumping = Limited RD options,§280.41(b),Limited RD options,§245.445
+4E,NONE,1110,No Delivery System,N/A - Verify tank use,N/A,N/A,N/A

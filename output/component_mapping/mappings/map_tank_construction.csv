@@ -1,0 +1,27 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+1D,UNPROTECTED STEEL (DOUBLE WALL),75,Secondary Containment,Compliant (All Vintages),§280.20(a); §280.43(g),Compliant,§245.421(a)
+1F,FIBERGLASS (DOUBLE WALL),8272,Secondary Containment,Compliant (All Vintages),§280.20(a)(1); UL 1316,Compliant,§245.421(a)
+1G,STEEL W/PLASTIC OR FRP JACKET (DW),5378,Secondary Containment,Compliant (All Vintages),§280.20(a)(3); UL 1746,Compliant,§245.421(a)
+1O,CP DOUBLE WALL STEEL (GALVANIC),3100,Secondary Containment,Compliant (All Vintages),§280.20(a)(2); STI F841,Compliant,§245.421(a)
+1V,STEEL W/FRP JACKET W/ANODES (DW),445,Secondary Containment,Compliant (All Vintages),§280.20(a)(2)-(3),Compliant,§245.421(a)
+1A,UNPROTECTED STEEL (SINGLE WALL),5368,Single Wall (Legacy),Legacy: Compliant,§280.21; §280.41(a)(1),Legacy: Compliant,§245.421(b)
+1A,UNPROTECTED STEEL (SINGLE WALL),NA,Single Wall (Legacy),Post-4/11/16: NON-COMPLIANT,§280.20 intro para,Post-12/22/18: NON-COMPLIANT,§245.421(a)
+1B,CP STEEL (GALVANIC),7094,Single Wall (Legacy),Legacy: Compliant,§280.20(a)(2); §280.31,Legacy: Compliant,§245.421(b); §245.432
+1B,CP STEEL (GALVANIC),NA,Single Wall (Legacy),Post-4/11/16: NON-COMPLIANT,§280.20 intro para,Post-12/22/18: NON-COMPLIANT,§245.421(a)
+1C,CP STEEL (IMPRESSED CURRENT),2284,Single Wall (Legacy),Legacy: Compliant,§280.20(a)(2); §280.31(c),Legacy: Compliant,§245.421(b); §245.432
+1C,CP STEEL (IMPRESSED CURRENT),NA,Single Wall (Legacy),Post-4/11/16: NON-COMPLIANT,§280.20 intro para,Post-12/22/18: NON-COMPLIANT,§245.421(a)
+1E,FIBERGLASS (SINGLE WALL),8647,Single Wall (Legacy),Legacy: Compliant,§280.20(a)(1); §280.41(a)(1),Legacy: Compliant,§245.421(b)
+1E,FIBERGLASS (SINGLE WALL),NA,Single Wall (Legacy),Post-4/11/16: NON-COMPLIANT,§280.20 intro para,Post-12/22/18: NON-COMPLIANT,§245.421(a)
+1H,STEEL W/FRP COATING (ACT-100) (SW),961,Single Wall (Legacy),Legacy: Compliant,§280.20(a)(3); STI ACT-100®,Legacy: Compliant,§245.421(b)
+1H,STEEL W/FRP COATING (ACT-100) (SW),NA,Single Wall (Legacy),Post-4/11/16: NON-COMPLIANT,§280.20 intro para,Post-12/22/18: NON-COMPLIANT,§245.421(a)
+1I,STEEL W/LINED INTERIOR,750,Single Wall (Upgraded),Legacy: Conditional,§280.21(b)(1); API 1631,Legacy: Conditional,§245.421(b)
+1I,STEEL W/LINED INTERIOR,NA,Single Wall (Upgraded),Post-4/11/16: NON-COMPLIANT,§280.20 intro para,Post-12/22/18: NON-COMPLIANT,§245.421(a)
+1J,CONCRETE,31,Single Wall (Legacy),Legacy: Conditional,§280.20(a)(5),Legacy: Conditional,§245.421(b)
+1P,CP STEEL WITH LINER,572,Single Wall (Upgraded),Legacy: Compliant,§280.21(b)(3),Legacy: Compliant,§245.421(b)
+1P,CP STEEL WITH LINER,NA,Single Wall (Upgraded),Post-4/11/16: NON-COMPLIANT,§280.20 intro para,Post-12/22/18: NON-COMPLIANT,§245.421(a)
+1W,STEEL W/FRP COATING W/ANODES (SW),15,Single Wall (Legacy),Legacy: Compliant,§280.20(a)(2)-(3),Legacy: Compliant,§245.421(b)
+1W,STEEL W/FRP COATING W/ANODES (SW),NA,Single Wall (Legacy),Post-4/11/16: NON-COMPLIANT,§280.20 intro para,Post-12/22/18: NON-COMPLIANT,§245.421(a)
+188,OTHER (COMPLIANT),15,Other/Unknown,Case-by-Case,§280.20(a)(5),Case-by-Case,§245.421
+199,OTHER,69,Other/Unknown,Presumed Non-Compliant,§280.20(a),Presumed Non-Compliant,§245.421
+1K,BOTTOM MODIFICATION,1,Other/Unknown,Repair Record Only,§280.33,Repair Record Only,§245.433
+1N,UNKNOWN,194,Data Gap,UNKNOWN - Verify,N/A,UNKNOWN - Verify,N/A

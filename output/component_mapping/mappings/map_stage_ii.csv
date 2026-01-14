@@ -1,0 +1,6 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+20A,COMPLETE BALANCE SYSTEM,623,Balance System,LARGELY OBSOLETE,EPA ORVR Waiver 2012,Decommissioning allowed,25 Pa. Code §129.82
+20B,COMPLETE ASSIST SYSTEM,2256,Assist System,LARGELY OBSOLETE,EPA ORVR Waiver 2012,Decommissioning allowed,25 Pa. Code §129.82
+20C,UG PIPING ONLY,6248,Partial Infrastructure,Infrastructure for Stage II,N/A - Equipment not active,Infrastructure only,25 Pa. Code §129.82
+20D,DECOMMISSIONED,2359,Decommissioned,Compliant with waiver,EPA ORVR Waiver,Compliant,25 Pa. Code §129.82
+20N,NONE,21258,No Stage II,Generally acceptable now,EPA ORVR Waiver,Generally acceptable,25 Pa. Code §129.82

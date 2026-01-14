@@ -1,0 +1,9 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+27I,COMPLETELY INSIDE CONTAINMENT SUMP/SECONDARY,16280,Secondary Containment,Compliant (All Vintages),§280.20(f); UDC,Compliant,§245.422
+27M,COMPLETELY JACKETED W/ SEALED BOOT,1926,Secondary Containment,Compliant (All Vintages),§280.20(b),Compliant,§245.422
+27N,NOT IN CONTACT W/ GROUND,1344,Above Ground,N/A - Not UG component,§280.20(b) applies to UG,N/A,§245.422
+27B,"CATHODICALLY PROTECTED, METALLIC",1788,Metallic (CP),Legacy: Compliant,§280.20(b)(2),Legacy: Compliant,§245.422(a)(2)
+27A,UNPROTECTED METALLIC (INCL WRAPPED/COATED),27,Metallic (Unprotected),Legacy: HIGH RISK,§280.21(c) req CP,Legacy: HIGH RISK,§245.422(b)
+2799,OTHER,190,Other/Unknown,Case-by-Case,§280.20(b)(4),Case-by-Case,§245.422
+27F,UNKNOWN,34,Data Gap,UNKNOWN - Verify,N/A,UNKNOWN - Verify,N/A
+27X,NONE,763,No Dispenser-End Flex,N/A,N/A,N/A,N/A

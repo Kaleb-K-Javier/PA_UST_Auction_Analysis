@@ -1,0 +1,5 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+18Y,YES,12244,Secondarily Contained,Compliant (All Vintages),§280.20; §280.43(g),Compliant,§245.421(a)
+18Y,YES,NA,Secondarily Contained,REQUIRED: Post-4/11/16,§280.20 intro para,REQUIRED: Post-12/22/18,§245.421(a)
+18N,NO,20287,NOT Secondarily Contained,Legacy: Acceptable,§280.41(a)(1); §280.21,Legacy: Acceptable,§245.421(b)
+18N,NO,NA,NOT Secondarily Contained,Post-4/11/16: NON-COMPLIANT,§280.20 intro para,Post-12/22/18: NON-COMPLIANT,§245.421(a)

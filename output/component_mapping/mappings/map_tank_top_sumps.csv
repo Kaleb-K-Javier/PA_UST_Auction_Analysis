@@ -1,0 +1,6 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+21A,AT ALL PENETRATIONS,18857,Full Coverage,Compliant (Best Practice),§280.35; §280.12 def,Compliant,§245.437
+21S,AT SOME PENETRATIONS,1127,Partial Coverage,Conditional: Legacy acceptable,§280.35,Conditional,§245.437
+21S,AT SOME PENETRATIONS,NA,Partial Coverage,Post-4/11/16: May not satisfy IM,§280.43(g) req IM all penetrations,Post-12/22/18: Verify,§245.444(1)
+21N,NONE,7554,No Tank-Top Sumps,Legacy: Acceptable,Not required for legacy,Legacy: Acceptable,Not required legacy
+21N,NONE,NA,No Tank-Top Sumps,Post-4/11/16: Verify IM method,§280.43(g) options,Post-12/22/18: Verify,§245.444(1)

@@ -1,0 +1,5 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+19A,COAX,8099,Coaxial System,CAA Area-Dependent,42 U.S.C. §7511a(b)(3),§129.82 Area-Dependent,25 Pa. Code §129.82
+19B,2 POINT,13101,Two-Point System,CAA Area-Dependent,42 U.S.C. §7511a(b)(3),§129.82 Area-Dependent,25 Pa. Code §129.82
+19N,NONE OR INCOMPLETE,12382,No/Incomplete Stage I,Check if required in area,42 U.S.C. §7511a(b)(3),Check county status,25 Pa. Code §129.82
+2I,"Double wall, metallic primary",1,Data Error - Piping Code,Data Quality Issue,N/A,Data Quality Issue,N/A

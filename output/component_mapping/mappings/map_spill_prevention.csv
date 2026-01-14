@@ -1,0 +1,6 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+6Y,YES,29689,Spill Prevention Installed,Compliant,§280.20(c)(1)(i),Compliant,§245.421(b)(6)
+6D,DOUBLE WALL SPILL PREV,2564,Double Wall (Best Practice),Compliant + Enhanced,§280.35(a)(1)(i),Compliant + Enhanced,§245.437(a)(1)
+6S,SINGLE WALL SPILL PREV,4680,Single Wall,Compliant,§280.20(c)(1)(i),Compliant,§245.421(b)(6)
+6N,NO,5543,NO Spill Prevention,NON-COMPLIANT,§280.20(c)(1)(i) required,NON-COMPLIANT,§245.421(b)(6) required
+6E,EXEMPT,512,Exempt,Verify Exemption Basis,§280.20(c)(2)-(3),Verify Basis,§245.421(b)(6)

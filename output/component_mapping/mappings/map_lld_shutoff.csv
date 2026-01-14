@@ -1,0 +1,3 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+23Y,YES,10425,Automatic Shutoff,Compliant: Best Practice,§280.44(a) shutoff OR alarm,Compliant,§245.445(2)(i)
+23N,NO,17043,Alarm Only / Manual,Compliant: If alarm triggers,§280.44(a) shutoff OR alarm,Compliant if alarm,§245.445(2)(i)

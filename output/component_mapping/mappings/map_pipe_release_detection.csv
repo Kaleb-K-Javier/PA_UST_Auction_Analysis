@@ -1,0 +1,18 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+5D,INTERSTITIAL MONITORING,10888,Secondary Containment (IM),Compliant (All Vintages),§280.43(g); §280.44(c),Compliant,§245.445(1)
+5D,INTERSTITIAL MONITORING,NA,Secondary Containment (IM),REQUIRED: Post-4/11/16 Piping,§280.41(b)(2),REQUIRED: Post-12/22/18,§245.445(1)
+5L,IM W/CONTINUOUS ALARM/SHUTOFF,7686,Secondary Containment (IM+),Compliant (All Vintages),§280.43(g); §280.44(a),Compliant,§245.445(1)
+5A,AUTOMATIC LINE LEAK DETECTOR,15109,Line Leak Detection,Legacy Pressurized: Required,§280.44(a); 3 gph @ 10 psi,Required: Pressurized,§245.445(2)(i)
+5A,AUTOMATIC LINE LEAK DETECTOR,NA,Line Leak Detection,Post-4/11/16: Required + IM,§280.41(b)(2)(i),Post-12/22/18: + IM,§245.445(1)
+5K,ELECTRONIC LINE LEAK DETECTOR,4762,Line Leak Detection,Legacy Pressurized: Required,§280.44(a),Required: Pressurized,§245.445(2)(i)
+5K,ELECTRONIC LINE LEAK DETECTOR,NA,Line Leak Detection,Post-4/11/16: Required + IM,§280.41(b)(2)(i),Post-12/22/18: + IM,§245.445(1)
+5B,ANNUAL LTT (PRESSURE),12413,Tightness Testing,Legacy Pressurized: Annual,§280.44(b); 0.1 gph @ 1.5× OP,Annual,§245.445(2)(ii)
+5B,ANNUAL LTT (PRESSURE),NA,Tightness Testing,Post-4/11/16: NON-COMPLIANT alone,§280.41(b)(2) req IM,Post-12/22/18: + IM,§245.445(1)
+5C,LTT - 3 YEARS (SUCTION),1646,Tightness Testing,Legacy Suction: Every 3 yrs,§280.44(b); §280.41(b)(1)(ii),Every 3 yrs,§245.445(3)
+5C,LTT - 3 YEARS (SUCTION),NA,Tightness Testing,Safe Suction: No RD required,§280.41(b)(1)(ii)(A)-(E),Safe Suction Exempt,§245.445(3)
+5J,STATISTICAL INVENTORY RECONCILIATION,2558,SIR,Legacy: Conditional,§280.44(c); §280.43(h),Conditional,§245.445(4)
+5E,GROUNDWATER MONITORING,63,External Monitoring,Conditional: Site Assessment,§280.44(c); §280.43(f),Conditional,§245.445(5)
+5F,VAPOR MONITORING,33,External Monitoring,Conditional: Site Assessment,§280.44(c); §280.43(e),Conditional,§245.445(5)
+5G,VISUAL INSPECTION,62,Visual Only,Supplemental Only,Not standalone per §280.44,Supplemental Only,§245.445
+5H,NONE,2796,NON-COMPLIANT,VIOLATION (Unless Safe Suction),§280.41(b) requires RD,VIOLATION,§245.445 requires RD
+5I,EXEMPT,11903,Exempt,Verify: Safe Suction or Exempt,§280.41(b)(1)(ii) or §280.10,Verify Basis,§245.1(b); §245.445(3)

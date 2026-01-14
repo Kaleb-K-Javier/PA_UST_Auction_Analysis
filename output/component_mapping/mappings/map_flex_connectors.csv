@@ -1,0 +1,12 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+PFLXD,Completely Inside Containment Sump/Secondary,4816,Secondary Containment,Compliant (All Vintages),§280.20; §280.43(g),Compliant,§245.422
+PFLXE,Completely Jacketed w/ Sealed Boot,1596,Secondary Containment,Compliant (All Vintages),§280.20(b),Compliant,§245.422
+PFLXF,Not in Contact w/ Ground,976,Above Ground,N/A - Not UG piping,§280.20(b) applies to UG,N/A,§245.422
+PFLXB,"Cathodically Protected, Metallic",2465,Metallic (CP),Legacy: Compliant,§280.20(b)(2),Legacy: Compliant,§245.422(a)(2)
+PFLXC,Flexible Coupling w/ Protected Metallic Ends,53,Metallic (CP),Legacy: Compliant,§280.20(b)(2),Legacy: Compliant,§245.422(a)(2)
+PFLXA,Unprotected Metallic (incl wrapped/coated),478,Metallic (Unprotected),Legacy: HIGH RISK,§280.21(c) req CP,Legacy: HIGH RISK,§245.422(b)
+PFLXA,Unprotected Metallic (incl wrapped/coated),NA,Metallic (Unprotected),Post-4/11/16: NON-COMPLIANT,§280.20(b)(2) req CP,Post-12/22/18: NON-COMPLIANT,§245.422(a)
+88,Other (Compliant),225,Other/Unknown,Case-by-Case,§280.20(b)(4),Case-by-Case,§245.422
+99,Other (Noncompliant),4,Other/Unknown,Presumed Non-Compliant,§280.20(b),Presumed Non-Compliant,§245.422
+PFLXX,None,197,No Flex Connectors,N/A,N/A,N/A,N/A
+UNK,Unknown,336,Data Gap,UNKNOWN - Verify,N/A,UNKNOWN - Verify,N/A

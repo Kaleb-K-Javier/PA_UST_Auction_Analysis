@@ -1,0 +1,9 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+7S,DROP TUBE SHUTOFF DEVICE,24814,Automatic Shutoff (≤95%),Compliant (All Vintages),§280.20(c)(1)(ii)(A),Compliant,§245.421(b)(7)
+7A,OVERFILL ALARM,9490,High-Level Alarm (≤90%),Compliant (All Vintages),§280.20(c)(1)(ii)(B),Compliant,§245.421(b)(7)
+7Y,YES,3550,Overfill Prevention Installed,Compliant - Verify Type,§280.20(c)(1)(ii),Compliant - Verify Type,§245.421(b)(7)
+7B,BALL FLOAT VALVE,2598,Ball Float (Vent Restrictor),Pre-10/13/15: GRANDFATHERED,§280.20(c)(3),Pre-12/22/18: GRANDFATHERED,§245.421(b)(7)
+7B,BALL FLOAT VALVE,NA,Ball Float (Vent Restrictor),Post-10/13/15: PROHIBITED,§280.20(c)(3) prohibits,Post-12/22/18: PROHIBITED,§245.421(b)(7)
+7B,BALL FLOAT VALVE,NA,Ball Float (Vent Restrictor),Replacement: PROHIBITED,§280.20(c)(3),Replacement: PROHIBITED,§245.421(b)(7)
+7N,NO,6183,NO Overfill Prevention,NON-COMPLIANT,§280.20(c)(1)(ii) required,NON-COMPLIANT,§245.421(b)(7) required
+7E,EXEMPT,885,Exempt,Verify Exemption Basis,§280.20(c)(2)-(3),Verify Basis,§245.421(b)(7)

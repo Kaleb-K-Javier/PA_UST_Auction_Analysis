@@ -1,0 +1,10 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+29D,"FRP, OUTER",3985,Secondary Containment,Compliant Outer Wall,§280.20(b)(1); §280.43(g),Compliant,§245.422(a)
+29E,"FLEX, OUTER",12227,Secondary Containment,Compliant Outer Wall,§280.20(b)(1); §280.43(g),Compliant,§245.422(a)
+29I,"POLY-ENCASED SS, OUTER",19,Secondary Containment,Compliant Outer Wall,§280.20(b); §280.43(g),Compliant,§245.422(a)
+29A,"BARE STEEL, OUTER",204,Metallic Outer,Requires CP if ground contact,§280.20(b)(2),Requires CP,§245.422(a)(2)
+29B,"CP PROTECTED, OUTER",51,Metallic Outer (CP),Compliant Outer Wall,§280.20(b)(2),Compliant,§245.422(a)(2)
+29N,NONE,6295,Single Wall System,Legacy: Acceptable,§280.41(b)(1),Legacy: Acceptable,§245.445
+29N,NONE,NA,Single Wall System,Post-4/11/16: NON-COMPLIANT,§280.20 intro para,Post-12/22/18: NON-COMPLIANT,§245.422(a)
+2999,"OTHER, OUTER",263,Other/Unknown,Case-by-Case,§280.20(b)(4),Case-by-Case,§245.422
+29F,"UNKNOWN, OUTER",14,Data Gap,UNKNOWN - Verify,N/A,UNKNOWN - Verify,N/A

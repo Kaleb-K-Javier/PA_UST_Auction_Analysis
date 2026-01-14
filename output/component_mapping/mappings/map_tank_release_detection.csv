@@ -1,0 +1,24 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+12H,INTERSTITIAL MONITORING (2 WALLS),13753,Secondary Containment (IM),Compliant (All Vintages),§280.43(g),Compliant,§245.444(1)
+12H,INTERSTITIAL MONITORING (2 WALLS),NA,Secondary Containment (IM),REQUIRED: Post-4/11/16 Tanks,§280.41(a)(2),REQUIRED: Post-12/22/18,§245.444(1)
+12I,INTERSTITIAL MONITORING (LINER),9,Secondary Containment (IM),Compliant (All Vintages),§280.43(g),Compliant,§245.444(1)
+12L,GROOVES IN IMPERMEABLE PAD,2,Secondary Containment (IM),Compliant (All Vintages),§280.43(g),Compliant,§245.444(1)
+12M,SLOTTED PIPE ABOVE PAD,4,Secondary Containment (IM),Compliant (All Vintages),§280.43(g),Compliant,§245.444(1)
+12E,AUTOMATIC TANK GAUGING,17834,Internal Monitoring (ATG),Legacy: Compliant,§280.43(d); 0.2 gph,Legacy: Compliant,§245.444(2)
+12E,AUTOMATIC TANK GAUGING,NA,Internal Monitoring (ATG),Post-4/11/16: NON-COMPLIANT,§280.41(a)(2) req IM,Post-12/22/18: NON-COMPLIANT,§245.444(1) req IM
+12D,STATISTICAL INVENTORY RECONCILIATION,4683,Internal Monitoring (SIR),Legacy: Compliant,§280.43(h); 0.2 gph,Legacy: Compliant,§245.444(6)
+12D,STATISTICAL INVENTORY RECONCILIATION,NA,Internal Monitoring (SIR),Post-4/11/16: NON-COMPLIANT,§280.41(a)(2) req IM,Post-12/22/18: NON-COMPLIANT,§245.444(1) req IM
+12F,MANUAL TANK GAUGING (36 HRS),407,Internal Monitoring (MTG),Conditional: ≤550 gal only,§280.43(b) Table,Conditional: ≤550 gal,§245.444(3)
+12F,MANUAL TANK GAUGING (36 HRS),NA,Internal Monitoring (MTG),Post-4/11/16: NON-COMPLIANT,§280.41(a)(2) req IM,Post-12/22/18: NON-COMPLIANT,§245.444(1) req IM
+12G,MANUAL TANK GAUGING (44/58 HRS),383,Internal Monitoring (MTG),Conditional: 551-1000 gal,§280.43(b) Table,Conditional: 551-1000 gal,§245.444(3)
+12G,MANUAL TANK GAUGING (44/58 HRS),NA,Internal Monitoring (MTG),Post-4/11/16: NON-COMPLIANT,§280.41(a)(2) req IM,Post-12/22/18: NON-COMPLIANT,§245.444(1) req IM
+12A,MONTHLY INVENTORY CONTROL,3611,Inventory Control,SUNSET: Must pair w/ TTT,§280.43(a); §280.41(a)(1)(i),SUNSET,§245.444(5)
+12A,MONTHLY INVENTORY CONTROL,NA,Inventory Control,10-yr window expired (all),§280.41(a)(1)(i),10-yr window expired,§245.444(5)
+12B,ANNUAL TANK TIGHTNESS TEST,2985,Tightness Testing,SUNSET: Supplemental only,§280.43(c); 0.1 gph,SUNSET: Supplemental,§245.444(4)
+12B,ANNUAL TANK TIGHTNESS TEST,NA,Tightness Testing,10-yr window expired (all),§280.41(a)(1)(i),10-yr window expired,§245.444(4)
+12C,TANK TIGHTNESS TEST (5 YRS),535,Tightness Testing,SUNSET: Supplemental only,§280.43(c),SUNSET: Supplemental,§245.444(4)
+12J,GROUNDWATER MONITORING,79,External Monitoring,Conditional: Site Assessment,§280.43(f); GW ≤20 ft,Conditional: Site Assessment,§245.444(8)
+12K,VAPOR MONITORING,58,External Monitoring,Conditional: Site Assessment,§280.43(e); Porous backfill,Conditional: Site Assessment,§245.444(7)
+1299,OTHER,8,Other/Unclassified,Case-by-Case,§280.40(a),Case-by-Case,§245.444
+12N,NONE,2833,NON-COMPLIANT,VIOLATION,§280.40(a) requires RD,VIOLATION,§245.441 requires RD
+12O,EXEMPT,953,Exempt/Deferred,Verify Exemption Basis,§280.10(b)-(c),Verify Exemption Basis,§245.1(b)

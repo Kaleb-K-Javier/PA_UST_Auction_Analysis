@@ -1,0 +1,7 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+22A,AT ALL DISPENSERS,18566,Full UDC Coverage,Compliant (Best Practice),§280.20(f),Compliant,§245.421(b)(8)
+22A,AT ALL DISPENSERS,NA,Full UDC Coverage,REQUIRED: New dispensers post-4/11/16,§280.20(f)(1),REQUIRED: Post-12/22/18,§245.421(b)(8)
+22S,AT SOME DISPENSERS,253,Partial UDC Coverage,Conditional: Legacy acceptable,§280.20(f),Conditional,§245.421(b)(8)
+22S,AT SOME DISPENSERS,NA,Partial UDC Coverage,Post-4/11/16 dispensers: Require UDC,§280.20(f)(1),Post-12/22/18: Require UDC,§245.421(b)(8)
+22N,NONE,8667,No UDC,Legacy: Acceptable,Not required pre-4/11/16,Legacy: Acceptable,Not required pre-12/22/18
+22N,NONE,NA,No UDC,Post-4/11/16 dispensers: NON-COMPLIANT,§280.20(f)(1) requires,Post-12/22/18: NON-COMPLIANT,§245.421(b)(8)

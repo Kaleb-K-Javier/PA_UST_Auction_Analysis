@@ -1,0 +1,10 @@
+CODE,COMPONENT_TYPE,N,Coarsened_Category,Federal_Status,Federal_Citation,PA_Status,PA_Citation
+28D,FRP,8859,Non-Corrodible,Compliant (Inner Wall),§280.20(b)(1); UL 971,Compliant,§245.422(a)(1)
+28E,FLEX,12507,Non-Corrodible,Compliant (Inner Wall),§280.20(b)(1),Compliant,§245.422(a)(1)
+28I,STAINLESS STEEL,47,Non-Corrodible,Compliant (Inner Wall),§280.20(b)(1),Compliant,§245.422(a)(1)
+28A,BARE STEEL,465,Metallic (Requires CP),Legacy: HIGH RISK,§280.21(c) req CP,Legacy: HIGH RISK,§245.422(b)
+28B,CP PROTECTED,712,Metallic (CP Protected),Legacy: Compliant,§280.20(b)(2),Legacy: Compliant,§245.422(a)(2)
+28C,COPPER,167,Metallic (Site-Specific),Legacy: Conditional,§280.20(b)(3),Legacy: Conditional,§245.422(b)
+2899,OTHER,34,Other/Unknown,Case-by-Case,§280.20(b)(4),Case-by-Case,§245.422
+28F,UNKNOWN,10,Data Gap,UNKNOWN - Verify,N/A,UNKNOWN - Verify,N/A
+28G,NO DISPENSING PIPING,373,No Piping,N/A,N/A,N/A,N/A
