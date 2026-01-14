@@ -336,114 +336,165 @@ sunk_reg_tbl <- modelsummary(
 
 save_table(sunk_reg_tbl, "404_sunk_cost_regression")
 
-# ==============================================================================
-# SECTION 4.3: BUILDING THE "EXPLICIT RULE" (Early Warning ML)
-# ==============================================================================
-message("\n--- 4.3 Building Early Warning System ---")
 
-# GOAL: Predict which claims will become "severe" using ONLY t=0 information
-# "Severe" = Top 10% of cost OR Top 10% of duration
+# ==============================================================================
+# SECTION 4.3: BUILDING THE "EXPLICIT RULE" (Human vs. ML Comparison)
+# ==============================================================================
+message("\n--- 4.3 Building Early Warning System (Leakage-Proof) ---")
 
-# Define "severe" outcome
+# GOAL: Compare a rigid "Checklist" policy vs. AI-assisted Triage
+# CONSTRAINT: Prevent Regional Leakage (Leave-One-Region-Out CV)
+
+# 1. Define Severity (Top 10% Cost or Duration)
 cost_threshold <- quantile(analysis_set$total_paid_real, 0.90, na.rm = TRUE)
 duration_threshold <- quantile(analysis_set$claim_duration_days, 0.90, na.rm = TRUE)
 
 analysis_set[, is_severe := as.numeric(
   total_paid_real > cost_threshold | 
-    claim_duration_days > duration_threshold
+  claim_duration_days > duration_threshold
 )]
 
-# FIX 1: Use '%.0f' for the numeric duration threshold
 message(sprintf("Severity Definition: Cost > $%s OR Duration > %.0f days",
                 format(cost_threshold, big.mark = ",", nsmall = 0),
                 duration_threshold))
 
-# FIX 2: Use 'na.rm = TRUE' to handle NAs in the summary print
-message(sprintf("Severe Claims: %d (%.1f%%)", 
-                sum(analysis_set$is_severe, na.rm = TRUE), 
-                100 * mean(analysis_set$is_severe, na.rm = TRUE)))
+# -------------------------------------------------------------------------
+# A. DEFINE FEATURE SETS
+# -------------------------------------------------------------------------
 
-# Feature selection: Only t=0 observable characteristics
-t0_features <- c(
-  "avg_tank_age",
-  "n_tanks_total", 
-  "share_bare_steel",
-  "share_pressure_piping",
-  "share_no_electronic_detection",
-  "share_fiberglass"
+# Set 1: Human / Regulatory Checklist (Interpretable)
+features_human <- c(
+  "avg_tank_age_at_claim", 
+  "n_tanks_total",
+  grep("^has_", names(analysis_set), value = TRUE)
 )
 
-# Add region as factor
-analysis_set[, region_factor := as.factor(dep_region)]
+# Set 2: ML / High-Dimensional Signals (Data-Driven)
+features_ml <- c(
+  features_human, 
+  grep("^bin_", names(analysis_set), value = TRUE),
+  grep("^qty_", names(analysis_set), value = TRUE)
+)
 
-# Prepare ML dataset
-# SAFETY CHECK: This line removes rows with missing features
-ml_data <- analysis_set[complete.cases(analysis_set[, ..t0_features])]
+# Prepare Data: Ensure Regions are present for Blocking
+ml_data <- analysis_set[complete.cases(analysis_set[, ..features_human])]
+ml_data <- ml_data[!is.na(is_severe) & !is.na(dep_region)]
 
-# SAFETY CHECK: This line (from original) removes the NAs you were worried about
-ml_data <- ml_data[!is.na(is_severe)]
+# Create numerical cluster IDs for GRF
+ml_data[, region_id := as.numeric(as.factor(dep_region))]
 
-message(sprintf("ML Dataset: %d claims with complete features", nrow(ml_data)))
+message(sprintf("Data: %d claims across %d regions", nrow(ml_data), uniqueN(ml_data$dep_region)))
 
-# Create model matrix
-X <- model.matrix(~ avg_tank_age + n_tanks_total + share_bare_steel + 
-                    share_pressure_piping + share_no_electronic_detection +
-                    region_factor - 1,
-                  data = ml_data)
+# -------------------------------------------------------------------------
+# B. TRAIN MODELS (Region-Aware Validation)
+# -------------------------------------------------------------------------
 
+# Model 1: Human Checklist (GLM)
+# STRATEGY: Leave-One-Region-Out Cross-Validation
+message("Training Human Model (Leave-One-Region-Out CV)...")
+ml_data[, score_human := NA_real_]
+unique_regions <- unique(ml_data$dep_region)
+f_human <- as.formula(paste("is_severe ~", paste(features_human, collapse = " + ")))
+
+for(r in unique_regions) {
+  # Train on all OTHER regions
+  train_idx <- which(ml_data$dep_region != r)
+  test_idx  <- which(ml_data$dep_region == r)
+  
+  if(length(test_idx) > 0) {
+    m_k <- glm(f_human, data = ml_data[train_idx], family = binomial)
+    # Predict on the held-out region
+    ml_data[test_idx, score_human := predict(m_k, newdata = ml_data[test_idx], type = "response")]
+  }
+}
+
+# Model 2: ML Probability Forest
+# STRATEGY: Cluster-Robust Out-of-Bag Predictions
+# 'clusters' argument ensures trees grown on Region A are NOT used to predict Region A
+message("Training ML Probability Forest (Cluster-Robust OOB)...")
+X_ml <- model.matrix(as.formula(paste("~", paste(features_ml, collapse = " + "), "-1")), 
+                     data = ml_data)
 Y <- as.factor(ml_data$is_severe)
 
-# Train Probability Forest
 set.seed(04062025)
-message("Training Probability Forest...")
+pf_ml <- probability_forest(X_ml, Y, 
+                            num.trees = 2000, # Increased trees for stability with small clusters
+                            seed = 092094,
+                            clusters = ml_data$region_id) # <--- PREVENTS LEAKAGE
 
-pf <- probability_forest(
-  X, Y,
-  num.trees = 1000,
-  seed = 092094
-)
+# OOB Predictions
+ml_data[, score_ml := predict(pf_ml, estimate.variance = FALSE)$predictions[, 2]]
 
-# Variable importance
-var_imp <- variable_importance(pf)
-imp_dt <- data.table(Feature = colnames(X), Importance = var_imp[, 1])
+# -------------------------------------------------------------------------
+# C. PERFORMANCE COMPARISON (LIFT)
+# -------------------------------------------------------------------------
+
+get_precision_at_k <- function(scores, actuals, k = 0.20) {
+  threshold <- quantile(scores, 1 - k, na.rm = TRUE)
+  flagged <- scores > threshold
+  mean(actuals[flagged], na.rm = TRUE)
+}
+
+base_rate <- mean(ml_data$is_severe)
+prec_human <- get_precision_at_k(ml_data$score_human, ml_data$is_severe)
+prec_ml    <- get_precision_at_k(ml_data$score_ml, ml_data$is_severe)
+
+lift_human <- prec_human / base_rate
+lift_ml    <- prec_ml / base_rate
+
+message(sprintf("\nPERFORMANCE (Top 20%% Triage):"))
+message(sprintf("  Baseline Severity Rate: %.1f%%", 100 * base_rate))
+message(sprintf("  Human Checklist Precision: %.1f%% (Lift: %.2fx)", 100 * prec_human, lift_human))
+message(sprintf("  ML Model Precision:        %.1f%% (Lift: %.2fx)", 100 * prec_ml, lift_ml))
+message(sprintf("  Value of ML Complexity:    +%.1f%% improvement over human rules", 
+                100 * (lift_ml - lift_human)/lift_human))
+
+# -------------------------------------------------------------------------
+# D. VISUALIZE: VARIABLE IMPORTANCE (ML)
+# -------------------------------------------------------------------------
+var_imp <- variable_importance(pf_ml)
+imp_dt <- data.table(Feature = colnames(X_ml), Importance = var_imp[, 1])
 setorder(imp_dt, -Importance)
 
-# Clean feature names for display
-imp_dt[, Feature_Clean := gsub("region_factor", "Region: ", Feature)]
-imp_dt[, Feature_Clean := gsub("_", " ", Feature_Clean)]
-imp_dt[, Feature_Clean := tools::toTitleCase(Feature_Clean)]
+imp_dt[, Type := fcase(
+  grepl("^bin_|^qty_", Feature), "ML/Data Signal",
+  grepl("^has_", Feature), "Regulatory Flag",
+  default = "Facility Trait"
+)]
+
+imp_dt[, Feature_Clean := Feature]
+imp_dt[, Feature_Clean := gsub("^bin_", "[Signal] ", Feature_Clean)]
+imp_dt[, Feature_Clean := gsub("^qty_", "[Count] ", Feature_Clean)]
+imp_dt[, Feature_Clean := gsub("^has_", "[Reg] ", Feature_Clean)]
+imp_dt[, Feature_Clean := gsub("avg_tank_age_at_claim", "Tank Age", Feature_Clean)]
 
 p_importance <- ggplot(head(imp_dt, 15), 
-                        aes(x = reorder(Feature_Clean, Importance), y = Importance)) +
-  geom_col(fill = "#3498db", alpha = 0.8) +
+                       aes(x = reorder(Feature_Clean, Importance), y = Importance, fill = Type)) +
+  geom_col(alpha = 0.9) +
   coord_flip() +
-  labs(title = "What Predicts Severe Claims? (ML Feature Importance)",
-       subtitle = "Based on Probability Forest trained on t=0 features only",
-       x = NULL, y = "Importance",
-       caption = "LIMITATION: Predictive, not causal. Association with outcomes.")
+  scale_fill_manual(values = c("ML/Data Signal" = "#8e44ad", 
+                               "Regulatory Flag" = "#e67e22",
+                               "Facility Trait" = "#3498db")) +
+  labs(title = "Human vs. Machine: What Predicts Severity?",
+       subtitle = "Variable Importance (Cluster-Robust Model)",
+       x = NULL, y = "Predictive Importance")
 
-save_figure(p_importance, "405_early_warning_importance")
+save_figure(p_importance, "405_human_vs_ml_importance")
 
-# Out-of-bag predictions (risk scores)
-ml_data[, risk_score := predict(pf, estimate.variance = FALSE)$predictions[, 2]]
+# Risk Score Distribution Plot
+perf_data <- rbind(
+  data.table(Model = "Human Checklist (LORO-CV)", Score = ml_data$score_human, Outcome = ml_data$is_severe),
+  data.table(Model = "ML Data-Driven (Cluster-OOB)", Score = ml_data$score_ml, Outcome = ml_data$is_severe)
+)
 
-# Calibration check
-calibration <- ml_data[, .(
-  Actual_Rate = mean(is_severe),
-  N = .N
-), by = .(Risk_Decile = cut(risk_score, breaks = quantile(risk_score, seq(0, 1, 0.1)), 
-                             include.lowest = TRUE))]
+p_scores <- ggplot(perf_data, aes(x = Score, fill = Model)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~Model) +
+  labs(title = "Risk Score Distribution (Region-Blind Predictions)", 
+       subtitle = "Scores reflect performance on unseen regions",
+       x = "Predicted Risk Probability")
 
-p_calibration <- ggplot(calibration, aes(x = Risk_Decile, y = Actual_Rate)) +
-  geom_col(fill = "#27ae60", alpha = 0.8) +
-  scale_y_continuous(labels = percent_format()) +
-  labs(title = "Early Warning System Calibration",
-       subtitle = "Higher risk scores → Higher actual severity rates",
-       x = "Risk Score Decile",
-       y = "Actual Severe Rate") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-save_figure(p_calibration, "406_early_warning_calibration")
+save_figure(p_scores, "406_risk_score_distribution")
 
 # Save model
 saveRDS(pf, file.path(paths$models, "probability_forest_early_warning.rds"))

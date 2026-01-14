@@ -1,7 +1,7 @@
 # R/etl/02d_ssrs_process.R
 # ==============================================================================
 # PA UST Facility-Tank Master Database Build Script
-# Version: 5.0 (Parallel + Clean Names + Dual Encoding + Data Dictionary)
+# Version: 7.0 (Integrated Risk Flagging + Data Quality/Unknowns)
 # ==============================================================================
 
 # 0. SETUP & PACKAGES
@@ -207,19 +207,23 @@ saveRDS(combined_tanks, "data/processed/combined_tanks_status.rds")
 fwrite(combined_tanks, "data/processed/combined_tanks_status.csv", nThread = getDTthreads())
 
 # ==============================================================================
-# STEP 4: PROCESS TANK COMPONENT ATTRIBUTES (REFACTORED - DUAL ENCODING)
+# STEP 4: PROCESS TANK COMPONENT ATTRIBUTES (DUAL ENCODING + COMPLIANCE LOGIC)
 # ==============================================================================
 message("\n--- Step 4: Process Tank Component Attributes (Dual Encoding) ---")
 
 comp_file <- "data/external/padep/allattributes(in).csv"
 map_dir   <- "qmd/output/mappings" # Ensure this path is correct relative to project root
+if(!dir.exists(map_dir)) map_dir <- "output/component_mapping/mappings"
 
 log_check("Component attributes CSV exists", file.exists(comp_file))
 
-# 4.1 Ingest Mappings (Dynamic)
+# 4.1 Ingest Mappings & Identify Risk Terms (MIGRATED FROM 03)
 # ------------------------------------------------------------------------------
 map_files <- list.files(map_dir, pattern = "\\.csv$", full.names = TRUE)
 message(sprintf("Found %d mapping files in %s", length(map_files), map_dir))
+
+# Storage for "Bad" keywords extracted from metadata
+risk_terms <- list(non_compliant = character(), legacy = character())
 
 read_mapping <- function(fpath) {
   dt <- fread(fpath, colClasses = "character")
@@ -232,6 +236,17 @@ read_mapping <- function(fpath) {
   # Handle potential header variation
   if("code" %in% names(dt)) setnames(dt, "code", "original_code")
   
+  # --- COMPLIANCE LOGIC MIGRATION ---
+  # Extract categories flagged as "Non-Compliant" or "Legacy" in metadata
+  if("federal_status" %in% names(dt) && "coarsened_category" %in% names(dt)) {
+    nc <- dt[grepl("Non-Compliant|High Risk", federal_status, ignore.case=TRUE), unique(coarsened_category)]
+    leg <- dt[grepl("Legacy", federal_status, ignore.case=TRUE), unique(coarsened_category)]
+    
+    # Push to global list
+    if(length(nc) > 0) risk_terms$non_compliant <<- c(risk_terms$non_compliant, nc)
+    if(length(leg) > 0) risk_terms$legacy <<- c(risk_terms$legacy, leg)
+  }
+  
   if(!"coarsened_category" %in% names(dt)) return(NULL)
   
   return(dt[, .(original_code, coarsened_category, component_type_key)])
@@ -239,6 +254,11 @@ read_mapping <- function(fpath) {
 
 map_master <- rbindlist(lapply(map_files, read_mapping), fill = TRUE)
 
+# Deduplicate Risk Terms
+risk_terms$non_compliant <- unique(risk_terms$non_compliant)
+risk_terms$legacy <- unique(risk_terms$legacy)
+message(sprintf("Identified %d Non-Compliant and %d Legacy category terms.", 
+                length(risk_terms$non_compliant), length(risk_terms$legacy)))
 
 # 4.2 Load Raw Components & Prep Join Keys (Optimized)
 # ------------------------------------------------------------------------------
@@ -252,26 +272,20 @@ tanks_long <- components[, .(
   FAC_ID             = trimws(as.character(fac_id)),
   TANK_ID            = as.integer(tank_clean),
   COMPONENT_CATEGORY = description,
-  COMPONENT_TYPE     = description_1,
   COMPONENT_VALUE    = attribute
 )]
 
 # FIX 2: Performance Optimization (Clean Unique Values Only)
-# Instead of cleaning 10M rows, we clean ~50 unique categories and join them back.
-
-# A. Category Lookup
 cat_lookup <- unique(tanks_long[, .(COMPONENT_CATEGORY)])
 cat_lookup[, component_key := make_clean_names(COMPONENT_CATEGORY)]
 
-# B. Value Lookup
 val_lookup <- unique(tanks_long[, .(COMPONENT_VALUE)])
 val_lookup[, code_clean := make_clean_names(COMPONENT_VALUE)]
 
-# C. Fast Join
 tanks_long <- merge(tanks_long, cat_lookup, by = "COMPONENT_CATEGORY", all.x = TRUE)
 tanks_long <- merge(tanks_long, val_lookup, by = "COMPONENT_VALUE", all.x = TRUE)
 
-# Prepare mapping master keys (apply same cleaning to reference codes)
+# Prepare mapping master keys
 map_master[, code_clean := make_clean_names(original_code)]
 
 message("Keys prepared via optimized lookup.")
@@ -286,13 +300,13 @@ tanks_mapped <- merge(
   all.x = TRUE
 )
 
-tanks_mapped[is.na(coarsened_category), coarsened_category := "Unmapped"]
+# --- CRITICAL FIX: Ensure Unknown/Missing are tagged "Unmapped" ---
+tanks_mapped[is.na(coarsened_category) | coarsened_category == "", coarsened_category := "Unmapped"]
 
 # 4.4 DUAL ENCODING STRATEGY
 # ------------------------------------------------------------------------------
 
 # STRATEGY A: CATEGORICAL (Factors for Tables)
-# Logic: Keep text value. Concatenate if multiple.
 message("  -> Generating Categorical Factors (cat_)...")
 dt_cat <- dcast(
   tanks_mapped, 
@@ -302,7 +316,6 @@ dt_cat <- dcast(
 )
 
 # STRATEGY B: INDICATORS (One-Hot for ML)
-# Logic: Binary flag for every specific RAW code
 message("  -> Generating Raw Indicators (ind_)...")
 dt_ind <- dcast(
   tanks_mapped,
@@ -321,31 +334,76 @@ for(col in ind_cols) {
 components_wide <- merge(dt_cat, dt_ind, by = c("FAC_ID", "TANK_ID"), all = TRUE)
 setkey(components_wide, FAC_ID, TANK_ID)
 
-saveRDS(components_wide, "data/processed/facility_attributes.rds") # New Output Name
+saveRDS(components_wide, "data/processed/facility_attributes.rds") 
 log_check("Dual Encoded Attributes Saved", file.exists("data/processed/facility_attributes.rds"))
 
 # ==============================================================================
-# STEP 5: BUILD MASTER DATASET
+# STEP 5: BUILD MASTER DATASET & CALCULATE RISK FLAGS
 # ==============================================================================
-message("\n--- Step 5: Master Dataset Build ---")
+message("\n--- Step 5: Master Dataset Build & Risk Calculation ---")
 
-# 5.2 Pre-Join Validation
-unmatched_tanks <- combined_tanks[!components_wide, on = .(FAC_ID, TANK_ID)]
-if (nrow(unmatched_tanks) > 0) fwrite(unmatched_tanks, "data/processed/tanks_without_components.csv")
-
-# 5.5 Execute Left Join
+# 5.1 Execute Left Join
 master_dataset <- merge(combined_tanks, components_wide, by = c("FAC_ID", "TANK_ID"), all.x = TRUE)
+
+# 5.2 CALCULATE RISK FLAGS (MIGRATED FROM 03)
+# ------------------------------------------------------------------------------
+message("  -> Calculating Regulatory Risk Flags...")
+
+# Helper: Check specific column for regex
+check_feat <- function(col, regex) {
+  if(!col %in% names(master_dataset)) return(rep(0L, nrow(master_dataset)))
+  as.integer(grepl(regex, master_dataset[[col]], ignore.case = TRUE))
+}
+
+# Helper: Check specific column for list of risk terms
+check_terms <- function(col, terms) {
+  if(!col %in% names(master_dataset) || length(terms) == 0) return(rep(0L, nrow(master_dataset)))
+  pattern <- paste(terms, collapse = "|")
+  as.integer(grepl(pattern, master_dataset[[col]], ignore.case = TRUE))
+}
+
+master_dataset[, `:=`(
+  # Construction Risks
+  flag_bare_steel       = check_feat("cat_tank_construction", "Bare Steel|Unprotected"),
+  flag_single_wall      = check_feat("cat_tank_construction", "Single Wall") | 
+                          check_feat("cat_ug_piping", "Single Wall"),
+  flag_secondary_containment = check_feat("cat_tank_construction", "Secondary Containment") |
+                               check_feat("cat_ust_secondary", "Secondary Containment"),
+  
+  # Piping Risks
+  flag_pressure_piping  = check_feat("cat_pump_delivery", "Pressurized"),
+  flag_suction_piping   = check_feat("cat_pump_delivery", "Suction"),
+  flag_galvanized_piping = check_feat("cat_ug_piping", "Galvanized"),
+  
+  # Detection Risks
+  flag_electronic_atg   = check_feat("cat_tank_release_detection", "ATG|Automatic Tank Gauging"),
+  flag_manual_detection = check_feat("cat_tank_release_detection", "Manual|Stick|Visual"),
+  flag_overfill_alarm   = check_feat("cat_overfill_prevention", "Alarm|Electronic.*Overfill"),
+  
+  # Compliance Risks (Dynamic from Mappings)
+  flag_noncompliant     = check_terms("cat_tank_construction", risk_terms$non_compliant) |
+                          check_terms("cat_ug_piping", risk_terms$non_compliant) |
+                          check_terms("cat_tank_release_detection", risk_terms$non_compliant),
+  
+  flag_legacy           = check_terms("cat_tank_construction", risk_terms$legacy),
+  
+  # --- NEW: DATA QUALITY RISK (Unknown/Missing Info) ---
+  # Flags if ANY major component (Construction, Piping, Detection) is explicitly "Unknown", "Unmapped", or "Data Gap"
+  flag_data_unknown     = check_feat("cat_tank_construction", "Unknown|Unmapped|Data Gap") | 
+                          check_feat("cat_ug_piping", "Unknown|Unmapped|Data Gap") | 
+                          check_feat("cat_tank_release_detection", "Unknown|Unmapped|Data Gap")
+)]
 
 # Clean up spurious columns if any
 if ("NA" %in% names(master_dataset)) master_dataset[, `NA` := NULL]
 
-log_check("Merge executed without row loss", nrow(master_dataset) == nrow(combined_tanks))
+log_check("Merge executed and Flags calculated", nrow(master_dataset) == nrow(combined_tanks))
 
-# 5.7 Final Keys
+# 5.3 Final Keys
 setkey(master_dataset, FAC_ID, TANK_ID, DATE_INSTALLED)
 setorder(master_dataset, FAC_ID, TANK_ID, DATE_INSTALLED)
 
-# 5.9 Save Master Dataset
+# 5.4 Save Master Dataset
 saveRDS(master_dataset, "data/processed/pa_ust_master_facility_tank_database.rds")
 fwrite(master_dataset, "data/processed/pa_ust_master_facility_tank_database.csv", nThread = getDTthreads())
 log_check("Master dataset saved", file.exists("data/processed/pa_ust_master_facility_tank_database.rds"))
@@ -365,13 +423,20 @@ build_data_dictionary <- function(dt) {
   dict[, pct_missing := round((n_missing / nrow(dt)) * 100, 2)]
   
   # Source Logic
-  dict[, origin := fifelse(grepl("^(cat_|ind_)", variable_name), "Component Attribute", "Base Facility Record")]
+  dict[, origin := fcase(
+    grepl("^cat_", variable_name), "Component Attribute (Categorical)",
+    grepl("^ind_", variable_name), "Component Attribute (Indicator)",
+    grepl("^flag_", variable_name), "Derived Risk Flag",
+    default = "Base Facility Record"
+  )]
   
   # Descriptions
   dict[variable_name == "FAC_ID", description := "Unique Facility Identifier (PADEP Other ID)"]
   dict[variable_name == "TANK_ID", description := "Unique Tank Sequence Number (Integer)"]
   dict[variable_name %like% "^cat_", description := "Coarsened Factor (Text) for Tables"]
   dict[variable_name %like% "^ind_", description := "Raw Indicator (Binary) for ML"]
+  dict[variable_name %like% "^flag_", description := "Regulatory Risk Flag (Calculated from Cats)"]
+  dict[variable_name == "flag_data_unknown", description := "Indicator: Key Attributes (Construction/Piping/Detection) are Unknown/Unmapped"]
   
   return(dict)
 }
@@ -393,4 +458,4 @@ for (entry in validation_log) {
 }
 sink()
 message(sprintf("\nValidation Checklist written to: %s", checklist_path))
-message("MASTER DATASET BUILD COMPLETE (v5.0)")
+message("MASTER DATASET BUILD COMPLETE (v7.0)")

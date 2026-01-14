@@ -98,51 +98,67 @@ message(sprintf("Master: %d claims | Contracts: %d records", nrow(master), nrow(
 # ==============================================================================
 message("\n--- 1.1 Correlates of Eligibility ---")
 
-## quicly print the status_group counts
-
-master[, .(uniqueN(claim_number)),.(by = status_group)]
+## Check status counts
+print(master[, .N, by = status_group])
 
 # Create analysis groups
 master[, eligibility_group := fcase(
   status_group == "Denied", "Denied",
   status_group == "Withdrawn", "Withdrawn",
-  status_group %in% c("Eligible", "Post Remedial", "Open"), "Eligible",
+  status_group %in% c("Eligible", "Post Remedial", "Open"), "Eligible/Active",
   default = "Other"
 )]
 
-master$claim
+# -------------------------------------------------------------------------
+# 1.1a Comprehensive Profile (Facilities + Costs + Regulatory Flags)
+# -------------------------------------------------------------------------
 
-# Summary statistics by group
-elig_summary <- master[eligibility_group %in% c("Denied", "Withdrawn", "Eligible"), .(
-  N = .N,
-  Mean_Tanks = mean(n_tanks_total, na.rm = TRUE),
-  Mean_Age = mean(avg_tank_age, na.rm = TRUE),
-  Share_BareSteel = mean(share_bare_steel, na.rm = TRUE),
-  Share_PressurePiping = mean(share_pressure_piping, na.rm = TRUE),
-  Mean_ALAE = mean(paid_alae_real, na.rm = TRUE),
-  Median_Duration_Days = median(claim_duration_years, na.rm = TRUE)
-), by = eligibility_group]
+# Define variables to analyze
+# 1. Facility Characteristics (The Physical Site)
+fac_vars <- c("n_tanks_total", "avg_tank_age_at_claim", "paid_alae_real", "claim_open_days")
 
-elig_tbl <- kbl(elig_summary, 
-                digits = 2, 
-                format = "html",
-                caption = "Claim Characteristics by Eligibility Status") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"))
+# 2. Human Regulatory Flags (The Checklist)
+reg_vars <- c("has_bare_steel", "has_single_walled", "has_pressure_piping", 
+              "has_noncompliant_pa", "has_unknown_material", "is_repeat_filer")
 
-save_table(elig_tbl, "101_eligibility_balance_table")
+analysis_vars <- c(fac_vars, reg_vars)
 
-# Balance table for formal comparison
-bal_vars <- c("n_tanks_total", "avg_tank_age", "share_bare_steel", 
-              "share_pressure_piping", "share_no_electronic_detection")
+# Summarize by group
+risk_summary <- master[eligibility_group %in% c("Denied", "Eligible/Active"), 
+                       lapply(.SD, mean, na.rm = TRUE), 
+                       by = eligibility_group, 
+                       .SDcols = analysis_vars]
 
+# Transpose for better readability
+risk_summary_long <- melt(risk_summary, id.vars = "eligibility_group", 
+                          variable.name = "Metric", value.name = "Mean_Value")
+risk_summary_wide <- dcast(risk_summary_long, Metric ~ eligibility_group, value.var = "Mean_Value")
+
+# Calculate difference
+risk_summary_wide[, Diff_Pct := (`Denied` - `Eligible/Active`) / `Eligible/Active`]
+
+# Format the table
+human_risk_tbl <- kbl(risk_summary_wide, digits = 3, format = "html",
+                      caption = "Claim Characteristics: Denied vs. Eligible") %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  pack_rows("Facility & Cost Metrics", 1, 4) %>%
+  pack_rows("Regulatory Risk Flags", 5, 10)
+
+save_table(human_risk_tbl, "101_eligibility_profile")
+
+# -------------------------------------------------------------------------
+# 1.1b Formal Balance Test (T-Tests)
+# -------------------------------------------------------------------------
 bal_data <- master[eligibility_group %in% c("Denied", "Eligible/Active"), 
-                   c("eligibility_group", bal_vars), with = FALSE]
-bal_data <- na.omit(bal_data)
+                   c("eligibility_group", analysis_vars), with = FALSE]
 
-# T-tests for each variable
-balance_results <- lapply(bal_vars, function(v) {
+balance_results <- lapply(analysis_vars, function(v) {
   denied <- bal_data[eligibility_group == "Denied", get(v)]
   eligible <- bal_data[eligibility_group == "Eligible/Active", get(v)]
+  
+  # Handle potential all-NA cases
+  if(all(is.na(denied)) || all(is.na(eligible))) return(NULL)
+  
   tt <- t.test(denied, eligible)
   data.table(
     Variable = v,
@@ -152,12 +168,14 @@ balance_results <- lapply(bal_vars, function(v) {
     P_Value = tt$p.value
   )
 })
+
 balance_dt <- rbindlist(balance_results)
 
 bal_tbl <- kbl(balance_dt, digits = 3, format = "html",
                caption = "Balance Test: Denied vs Eligible Claims") %>%
   kable_styling() %>%
-  column_spec(5, color = ifelse(balance_dt$P_Value < 0.05, "red", "black"))
+  column_spec(5, color = ifelse(balance_dt$P_Value < 0.05, "red", "black"), 
+              bold = ifelse(balance_dt$P_Value < 0.05, TRUE, FALSE))
 
 save_table(bal_tbl, "102_eligibility_balance_test")
 
@@ -416,6 +434,61 @@ consultant_tbl <- kbl(top_consultants, digits = 0, format = "html",
   kable_styling()
 
 save_table(consultant_tbl, "302_top_consultants")
+
+# ==============================================================================
+# HHI ANALYSIS & MAPPING
+# ==============================================================================
+
+# 1. Define PA DEP Regions (County Lookup)
+# This mapping ensures counties are grouped correctly for the outline
+dep_regions <- data.table(
+  region = c(rep("Southeast", 5), rep("Northeast", 11), rep("Southcentral", 15), 
+             rep("Northcentral", 14), rep("Southwest", 10), rep("Northwest", 12)),
+  subregion = tolower(c(
+    "Bucks", "Chester", "Delaware", "Montgomery", "Philadelphia",
+    "Carbon", "Lackawanna", "Lehigh", "Luzerne", "Monroe", "Northampton", "Pike", "Schuylkill", "Susquehanna", "Wayne", "Wyoming",
+    "Adams", "Bedford", "Berks", "Blair", "Cumberland", "Dauphin", "Franklin", "Fulton", "Huntingdon", "Juniata", "Lancaster", "Lebanon", "Mifflin", "Perry", "York",
+    "Bradford", "Cameron", "Centre", "Clearfield", "Clinton", "Columbia", "Lycoming", "Montour", "Northumberland", "Potter", "Snyder", "Sullivan", "Tioga", "Union",
+    "Allegheny", "Armstrong", "Beaver", "Cambria", "Fayette", "Greene", "Indiana", "Somerset", "Washington", "Westmoreland",
+    "Butler", "Clarion", "Crawford", "Elk", "Erie", "Forest", "Jefferson", "Lawrence", "McKean", "Mercer", "Venango", "Warren"
+  ))
+)
+
+# 2. Calculate HHI by County
+contracts_merged <- merge(contracts, master[, .(claim_number, county)], by = "claim_number")
+contracts_merged[, county_clean := tolower(county)]
+
+county_hhi <- contracts_merged[!is.na(consultant) & total_contract_value_real > 0, .(
+  val = sum(total_contract_value_real)
+), by = .(county_clean, consultant)]
+county_hhi[, share := val / sum(val), by = county_clean]
+county_hhi_final <- county_hhi[, .(HHI = sum(share^2) * 10000), by = county_clean]
+
+# 3. Join with Map Data
+pa_map <- map_data("county", "pennsylvania")
+setDT(pa_map)
+map_data_full <- merge(pa_map, dep_regions, by = "subregion", all.x = TRUE)
+map_data_full <- merge(map_data_full, county_hhi_final, by = "subregion", all.x = TRUE)
+setorder(map_data_full, group, order)
+
+# 4. Generate the Map
+p_hhi_map <- ggplot(map_data_full, aes(x = long, y = lat, group = group)) +
+  # A. County Fill (The Heatmap)
+  geom_polygon(aes(fill = HHI), color = NA) +
+  # B. County Borders (Thin, White)
+  geom_polygon(fill = NA, color = "white", linewidth = 0.1) +
+  # C. Region Outlines (Thick, Dark) - trick: union polygons implicitly by grouping
+  geom_polygon(data = map_data_full, aes(color = region), fill = NA, linewidth = 0.8) +
+  scale_fill_ustif_c(name = "Market Concentration (HHI)", limits = c(0, 10000)) +
+  scale_color_ustif(name = "DEP Region") +
+  coord_fixed(1.3) +
+  theme_void() + # Clean map theme
+  theme(legend.position = "bottom", 
+        legend.title = element_text(face="bold"),
+        legend.key.width = unit(1.5, "cm"))
+
+# 5. Save Artifact
+save_plot_pub(p_hhi_map, "301_hhi_county_map_regions", width = 8, height = 5)
 
 # ==============================================================================
 # SECTION 3.2: ADJUSTER CONCENTRATION

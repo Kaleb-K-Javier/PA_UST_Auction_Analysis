@@ -149,27 +149,31 @@ p_intervention_by_type <- ggplot(auction_claims[intervention_lag_days > 0 &
 save_figure(p_intervention_by_type, "202_intervention_by_type")
 
 # What predicts going to auction?
+# CORRECTED: Use 'went_to_auction' to capture ALL competitive mechanisms
+# (Bid-to-Result + Scope of Work + Competitive T&M)
 auction_pred <- feols(
-  I(contract_type == "Bid-to-Result") ~ avg_tank_age + n_tanks_total + 
-    share_bare_steel + share_pressure_piping | dep_region,
-  data = master[total_paid_real > 1000 & !is.na(avg_tank_age)],
+  went_to_auction ~ avg_tank_age_at_claim + n_tanks_total + 
+    has_bare_steel + has_pressure_piping + has_noncompliant_pa + 
+    has_unknown_material | dep_region,
+  data = master[total_paid_real > 1000 & !is.na(avg_tank_age_at_claim)],
   cluster = "dep_region"
 )
 
 pred_tbl <- modelsummary(
-  list("Pr(Bid-to-Result)" = auction_pred),
+  list("Pr(Any Competitive Auction)" = auction_pred),
   coef_map = c(
-    "avg_tank_age" = "Tank Age",
+    "avg_tank_age_at_claim" = "Tank Age",
     "n_tanks_total" = "N Tanks",
-    "share_bare_steel" = "Share: Bare Steel",
-    "share_pressure_piping" = "Share: Pressure Piping"
+    "has_bare_steel" = "Flag: Bare Steel",
+    "has_pressure_piping" = "Flag: Pressure Piping",
+    "has_noncompliant_pa" = "Flag: Non-Compliant",
+    "has_unknown_material" = "Flag: Unknown Material"
   ),
   stars = c('*' = .1, '**' = .05, '***' = .01),
   output = "kableExtra"
 ) %>% kable_styling()
 
 save_table(pred_tbl, "203_auction_predictors_lpm")
-
 # ==============================================================================
 # SECTION 2.2: COSTS OF WORK IN AUCTIONS
 # ==============================================================================
