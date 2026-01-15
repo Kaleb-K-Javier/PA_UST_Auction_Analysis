@@ -1,14 +1,21 @@
 PA UST DATABASE BUILD - VALIDATION CHECKLIST
-Date: 2026-01-14 15:57:02.818001
+Date: 2026-01-15 09:44:58.767968
 
 [x] All six regional active tank Excel files exist
 [x] All regional files loaded successfully
+[x] Active tanks: CAPACITY column present
 [x] Inactive tank directory contains files
 [x] Inactive parallel processing completed
+[x] Inactive tanks: CAPACITY column present
 [x] Row count equals sum
+[x] Combined tanks: CAPACITY column present
+[x] Combined tanks: CAPACITY has non-NA values
 [x] Component attributes CSV exists
 [x] Dual Encoded Attributes Saved
+[x] Dictionary: All feature_names unique
+[x] Dictionary: All clean_labels unique
 [x] ML Feature Dictionary Saved
+[x] Master: CAPACITY column present after merge
 [x] Merge executed and Flags calculated
 [x] Master dataset saved
 [x] Data dictionary generated

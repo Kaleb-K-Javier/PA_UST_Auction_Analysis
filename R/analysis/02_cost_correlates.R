@@ -94,6 +94,105 @@ auction_claims <- master[contract_type != "No Contract" & total_paid_real > 1000
 message(sprintf("Master: %d claims | With Contracts: %d | Contracts Table: %d",
                 nrow(master), nrow(auction_claims), nrow(contracts)))
 
+
+# ==============================================================================
+# 1. FACILITY CHARACTERISTICS (X-Variables: Physical & Owner Traits)
+# Source: 03_merge_master_dataset.R (Sections 3, 4, 6, 7)
+# ==============================================================================
+facility_vars <- c(
+  # --- Census & Scale ---
+  "n_tanks_total",            # Historical total tanks (Census baseline)
+  "n_tanks_active",           # Count of tanks active at claim date
+  "facility_age",             # Age of oldest tank ever installed
+  "avg_tank_age",             # Average age of active tanks at claim date
+  "region_cluster",           # Geographic grouping (Southeast, Northwest, etc.)
+
+  # --- Capacity Metrics (v8.0) ---
+  "total_capacity_gal",       # Sum of capacity (active tanks)
+  "avg_tank_capacity_gal",    # Average tank capacity
+  "max_tank_capacity_gal",    # Size of largest tank on site
+
+  # --- Owner Profile ---
+  "business_category",        # Broad sector (Retail Gas vs. Public vs. Industrial)
+  "final_owner_sector",       # Granular owner type (e.g., "Major Chain (Sheetz)")
+  "Owner_Size_Class",         # Categorical size (Single-Site vs. Corp Fleet)
+  "facility_count",           # Number of sites owned (Sophistication proxy)
+
+  # --- Physical Risk Flags (Binary: Did ANY active tank have this?) ---
+  "has_bare_steel",           # 1 if any active tank is Bare Steel
+  "has_single_walled",        # 1 if any active tank/piping is Single Walled
+  "has_secondary_containment",# 1 if secondary containment exists
+  "has_pressure_piping",      # 1 if pressurized piping exists
+  "has_suction_piping",       # 1 if suction piping exists
+  "has_galvanized_piping",    # 1 if galvanized piping exists
+  "has_electronic_atg",       # 1 if Electronic Automatic Tank Gauging used
+  "has_manual_detection",     # 1 if Manual/Stick/Visual detection used
+  "has_overfill_alarm",       # 1 if overfill alarm present
+  "has_gasoline",             # 1 if substance is Gasoline
+  "has_diesel",               # 1 if substance is Diesel
+  "has_noncompliant",         # 1 if any active tank is flagged Non-Compliant
+
+  # --- Risk Proportions (Continuous: % of active tanks) ---
+  "share_bare_steel",         # % Bare Steel
+  "share_single_wall",        # % Single Walled
+  "share_pressure_piping",    # % Pressure Piping
+  "share_noncompliant",       # % Non-Compliant
+  "share_data_unknown",       # % General Unknown Data
+  "share_tank_construction_unknown",      # % Unknown Tank Construction
+  "share_ug_piping_unknown",              # % Unknown Piping Material
+  "share_tank_release_detection_unknown", # % Unknown Detection Method
+
+  # --- Historical Churn/Closure Activity ---
+  "has_recent_closure",       # 1 if tank closed <90 days before claim
+  "n_closed_0_30d",           # Count closed 0-30 days prior
+  "n_closed_31_90d",          # Count closed 31-90 days prior
+  "n_closed_1yr",             # Count closed within 1 year prior
+  "n_closed_total"            # Cumulative historical closures
+)
+
+# ==============================================================================
+# 2. CLAIM CHARACTERISTICS (X-Variables: Event Specifics & History)
+# Source: 03_merge_master_dataset.R (Section 5)
+# ==============================================================================
+claim_vars <- c(
+  # --- Reporting Behavior ---
+  "reporting_lag_days",       # Time from Loss_Date to Report_Date (Speed of reporting)
+  "Year",                     # Calendar year of claim (Trend control)
+  
+  # --- Filer History (Behavioral Risk) ---
+  "is_repeat_filer",          # 1 if this facility has filed claims before
+  "prior_claims_n",           # Exact count of previous claims
+  "days_since_prior_claim",   # Recency: Days since the last claim was filed
+  "avg_prior_claim_cost",     # Severity History: Average cost of past claims
+  
+  # --- Data Quality/Legacy ---
+  "has_legacy_grandfathered", # 1 if tanks are pre-1988/Grandfathered
+  "has_unknown_data"          # 1 if key attributes are missing (Binary Flag)
+)
+
+# ==============================================================================
+# 3. OUTCOME VARIABLES (Y-Variables: Costs, Durations, Decisions)
+# Source: 01_descriptive_stats.R & 02_cost_correlates.R
+# ==============================================================================
+outcome_vars <- c(
+  # --- Financial Outcomes (Inflation Adjusted) ---
+  "total_paid_real",          # Total Claim Cost (Indemnity + Expense) in 2025$
+  "paid_loss_real",           # Indemnity/Remediation portion
+  "paid_alae_real",           # Legal/Adjuster expense portion
+  "total_contract_value_real",# Value of specific contracts (if auctioned)
+  "log_cost",                 # Log(total_paid_real + 1) for regressions
+  
+  # --- Operational Outcomes ---
+  "claim_duration_days",      # Days from Claim_Date to Closed_Date
+  "intervention_lag_days",    # Days from Claim to First Contract (Auction timing)
+  
+  # --- Binary/Classification Outcomes ---
+  "status_group",             # "Denied", "Eligible", "Withdrawn"
+  "went_to_auction",          # 1 if claim had a competitive bid (PFP/SOW)
+  "is_high_cost",             # 1 if total_paid > 90th percentile
+  "is_long_duration"          # 1 if duration > 90th percentile
+)
+
 # ==============================================================================
 # SECTION 2.1: INTERVENTION TIMING
 # ==============================================================================
