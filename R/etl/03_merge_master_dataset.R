@@ -185,7 +185,10 @@ census_risk_profile <- tanks[, .(
   share_bare_steel      = mean(flag_bare_steel, na.rm = TRUE),
   share_single_wall     = mean(flag_single_wall, na.rm = TRUE),
   share_noncompliant    = mean(flag_noncompliant, na.rm = TRUE),
-  share_data_unknown    = mean(flag_data_unknown, na.rm = TRUE)
+  share_data_unknown    = mean(flag_data_unknown, na.rm = TRUE),
+  share_tank_construction_unknown   = mean(flag_tank_construction_unknown, na.rm = TRUE),
+  share_ug_piping_unknown           = mean(flag_ug_piping_unknown, na.rm = TRUE),
+  share_tank_release_detection_unknown = mean(flag_tank_release_detection_unknown, na.rm = TRUE)
 ), by = FAC_ID]
 
 for(j in names(census_risk_profile)[-1]) {
@@ -194,7 +197,10 @@ for(j in names(census_risk_profile)[-1]) {
 
 census_master <- tanks[, .(
   n_tanks_history = uniqueN(TANK_ID), # Total historical tanks (Active + Closed)
-  facility_age = as.numeric(Sys.Date() - min(DATE_INSTALLED, na.rm = TRUE)) / 365.25
+  facility_age = as.numeric(Sys.Date() - min(DATE_INSTALLED, na.rm = TRUE)) / 365.25,
+  total_capacity_gal = sum(CAPACITY, na.rm = TRUE),
+  avg_tank_capacity_gal = mean(CAPACITY, na.rm = TRUE),
+  max_tank_capacity_gal = max(CAPACITY, na.rm = TRUE)
 ), by = FAC_ID]
 
 census_master <- merge(census_master, census_risk_profile, by = "FAC_ID", all.x = TRUE)
@@ -316,7 +322,13 @@ reg_profile <- exposure_tanks[, .(
   has_electronic_atg    = max(flag_electronic_atg, na.rm = TRUE),
   has_manual_detection  = max(flag_manual_detection, na.rm = TRUE),
   has_overfill_alarm    = max(flag_overfill_alarm, na.rm = TRUE),
-  
+  has_tank_construction_unknown   = max(flag_tank_construction_unknown, na.rm = TRUE),
+  has_ug_piping_unknown           = max(flag_ug_piping_unknown, na.rm = TRUE),
+  has_tank_release_detection_unknown = max(flag_tank_release_detection_unknown, na.rm = TRUE),
+  # v8.0: CAPACITY metrics for exposed tanks
+  total_capacity_gal    = sum(CAPACITY, na.rm = TRUE),
+  avg_tank_capacity_gal = mean(CAPACITY, na.rm = TRUE),
+  max_tank_capacity_gal = max(CAPACITY, na.rm = TRUE),
   # Regulatory & Data Quality
   has_noncompliant      = max(flag_noncompliant, na.rm = TRUE),
   has_legacy_grandfathered = max(flag_legacy, na.rm = TRUE),
@@ -328,7 +340,10 @@ reg_profile <- exposure_tanks[, .(
 
 # Clean Inf/-Inf
 for (col in names(reg_profile)) set(reg_profile, which(is.infinite(reg_profile[[col]])), col, 0)
-
+# Handle NA capacity (set to 0 for facilities with no capacity data)
+for (col in c("total_capacity_gal", "avg_tank_capacity_gal", "max_tank_capacity_gal")) {
+  set(reg_profile, which(is.na(reg_profile[[col]]) | is.infinite(reg_profile[[col]])), col, 0)
+}
 # ---------------------------------------------------------------------------
 # 7.2 ML INDICATORS (Layer 2: Aggregated Indicators from 02d)
 # ---------------------------------------------------------------------------
@@ -364,6 +379,9 @@ risk_shares <- exposure_tanks[, .(
   share_bare_steel      = mean(flag_bare_steel, na.rm = TRUE),
   share_single_wall     = mean(flag_single_wall, na.rm = TRUE),
   share_noncompliant    = mean(flag_noncompliant, na.rm = TRUE),
+  share_tank_construction_unknown   = mean(flag_tank_construction_unknown, na.rm = TRUE),
+  share_ug_piping_unknown           = mean(flag_ug_piping_unknown, na.rm = TRUE),
+  share_tank_release_detection_unknown = mean(flag_tank_release_detection_unknown, na.rm = TRUE),
   share_data_unknown    = mean(flag_data_unknown, na.rm = TRUE)
 ), by = claim_number]
 

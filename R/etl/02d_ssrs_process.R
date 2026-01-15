@@ -1,7 +1,12 @@
 # R/etl/02d_ssrs_process.R
 # ==============================================================================
 # PA UST Facility-Tank Master Database Build Script
-# Version: 7.0 (Integrated Risk Flagging + Data Quality/Unknowns)
+# Version: 8.0 (Strict Slug + Duplicate Diagnostics)
+# ==============================================================================
+# CHANGES FROM v7.1:
+#   - CAPACITY tracking verified at checkpoints (Steps 1, 2, 3, 5)
+#   - Duplicate diagnostic audit table before pivoting (Step 4.4)
+#   - clean_label now includes (CODE) suffix for guaranteed uniqueness (Step 4.6)
 # ==============================================================================
 
 # 0. SETUP & PACKAGES
@@ -88,6 +93,10 @@ message(sprintf("Filtered out %d AST records", n_before - nrow(active_tanks)))
 
 # 1.7 Source Indicator & Checkpoint
 active_tanks[, source_dataset := "active"]
+
+# v8.0: CAPACITY checkpoint
+log_check("Active tanks: CAPACITY column present", "CAPACITY" %in% names(active_tanks))
+
 saveRDS(active_tanks, "data/processed/active_tanks_harmonized.rds")
 fwrite(active_tanks, "data/processed/active_tanks_harmonized.csv", nThread = getDTthreads())
 
@@ -186,6 +195,9 @@ inactive_tanks <- inactive_tanks[!is.na(TANK_ID) & TANK_ID > 0]
 inactive_tanks <- inactive_tanks[TANK_TYPE == "UST"]
 inactive_tanks[, source_dataset := "inactive"]
 
+# v8.0: CAPACITY checkpoint
+log_check("Inactive tanks: CAPACITY column present", "CAPACITY" %in% names(inactive_tanks))
+
 saveRDS(inactive_tanks, "data/processed/inactive_tanks_harmonized.rds")
 fwrite(inactive_tanks, "data/processed/inactive_tanks_harmonized.csv", nThread = getDTthreads())
 
@@ -202,6 +214,14 @@ combined_tanks[, is_closed := fifelse(source_dataset == "inactive", 1L, 0L)]
 
 setkey(combined_tanks, FAC_ID, TANK_ID, DATE_INSTALLED)
 setorder(combined_tanks, FAC_ID, TANK_ID, DATE_INSTALLED)
+
+# v8.0: CAPACITY checkpoint before attribute merge
+log_check("Combined tanks: CAPACITY column present", "CAPACITY" %in% names(combined_tanks))
+log_check("Combined tanks: CAPACITY has non-NA values", sum(!is.na(combined_tanks$CAPACITY)) > 0)
+message(sprintf("  CAPACITY coverage: %d of %d tanks (%.1f%%)", 
+                sum(!is.na(combined_tanks$CAPACITY)), 
+                nrow(combined_tanks),
+                100 * sum(!is.na(combined_tanks$CAPACITY)) / nrow(combined_tanks)))
 
 saveRDS(combined_tanks, "data/processed/combined_tanks_status.rds")
 fwrite(combined_tanks, "data/processed/combined_tanks_status.csv", nThread = getDTthreads())
@@ -268,11 +288,13 @@ setnames(components, janitor::make_clean_names(names(components)))
 # FIX 1: Handle non-numeric Tank IDs (e.g., "001A") to prevent NA warning
 components[, tank_clean := gsub("[^0-9]", "", tank_name)] # Remove non-digits
 
+# FIX: Added COMPONENT_DETAIL (description_1) for ML labels
 tanks_long <- components[, .(
   FAC_ID             = trimws(as.character(fac_id)),
   TANK_ID            = as.integer(tank_clean),
   COMPONENT_CATEGORY = description,
-  COMPONENT_VALUE    = attribute
+  COMPONENT_VALUE    = attribute,
+  COMPONENT_DETAIL   = description_1
 )]
 
 # FIX 2: Performance Optimization (Clean Unique Values Only)
@@ -317,17 +339,54 @@ dt_cat <- dcast(
 
 # STRATEGY B: INDICATORS (One-Hot for ML)
 message("  -> Generating Raw Indicators (ind_)...")
+
+# v8.0: Construct feature_name explicitly for diagnostic
+tanks_mapped[, feature_name := paste0("ind_", component_key, "_", code_clean)]
+
+# --- v8.0: DUPLICATE DIAGNOSTIC (Validate, Don't Hide) ---
+message("\n  --- Duplicate Diagnostic ---")
+dup_check <- tanks_mapped[, .N, by = .(FAC_ID, TANK_ID, feature_name)]
+duplicate_audit <- dup_check[N > 1]
+
+if(nrow(duplicate_audit) > 0) {
+  message(sprintf("  WARNING: %d tank-feature combinations have duplicate entries", nrow(duplicate_audit)))
+  message(sprintf("  Affected unique tanks: %d", uniqueN(duplicate_audit[, .(FAC_ID, TANK_ID)])))
+  
+  # Save diagnostic table for review
+  saveRDS(duplicate_audit, "data/processed/DIAGNOSTIC_duplicate_tank_features.rds")
+  
+  # Sample of problematic entries for logging
+  sample_dups <- head(duplicate_audit[order(-N)], 10)
+  message("\n  Top 10 duplicated feature entries:")
+  print(sample_dups)
+  
+  # Detailed audit: what raw values caused duplicates?
+  dup_detail <- merge(
+    duplicate_audit,
+    tanks_mapped[, .(FAC_ID, TANK_ID, feature_name, COMPONENT_CATEGORY, COMPONENT_VALUE, COMPONENT_DETAIL, coarsened_category)],
+    by = c("FAC_ID", "TANK_ID", "feature_name")
+  )
+  saveRDS(dup_detail, "data/processed/DIAGNOSTIC_duplicate_detail.rds")
+  message("  Saved: DIAGNOSTIC_duplicate_tank_features.rds")
+  message("  Saved: DIAGNOSTIC_duplicate_detail.rds")
+} else {
+  message("  OK: No duplicate tank-feature combinations detected")
+}
+
+# v8.0: dcast uses feature_name column; fun.aggregate = length handles duplicates
 dt_ind <- dcast(
   tanks_mapped,
-  FAC_ID + TANK_ID ~ paste0("ind_", component_key, "_", code_clean),
+  FAC_ID + TANK_ID ~ feature_name,
   fun.aggregate = length
 )
 
-# Normalize Counts to Binary (1/0)
+# Normalize Counts to Binary (1/0) - binarize AFTER pivot to handle duplicate counts
 ind_cols <- names(dt_ind)[-c(1:2)]
 for(col in ind_cols) {
   set(dt_ind, j = col, value = as.numeric(dt_ind[[col]] > 0))
 }
+
+message(sprintf("  Generated %d binary indicator features", length(ind_cols)))
 
 # 4.5 Final Merge
 # ------------------------------------------------------------------------------
@@ -337,6 +396,59 @@ setkey(components_wide, FAC_ID, TANK_ID)
 saveRDS(components_wide, "data/processed/facility_attributes.rds") 
 log_check("Dual Encoded Attributes Saved", file.exists("data/processed/facility_attributes.rds"))
 
+
+# ==============================================================================
+# 4.6 GENERATE ML FEATURE DICTIONARY (ENHANCED - v8.0 STRICT UNIQUENESS)
+# ==============================================================================
+message("  -> Generating Enhanced ML Feature Dictionary for Visualization Labels...")
+
+# 1. Extract unique mappings from the mapped long-format data
+# Include COMPONENT_DETAIL (description_1) for specific labeling
+feature_map <- unique(tanks_mapped[, .(
+  component_key,
+  code_clean,
+  original_code = COMPONENT_VALUE,
+  category_label = COMPONENT_CATEGORY,
+  detail_label = COMPONENT_DETAIL
+)])
+
+# 2. Reconstruct the exact column names used in dcast
+# Format must match: paste0("ind_", component_key, "_", code_clean)
+feature_map[, feature_name := paste0("ind_", component_key, "_", code_clean)]
+
+# 3. v8.0 FIX: Create GUARANTEED UNIQUE Audience-Friendly Label
+# Format: "Detail [Category] (CODE)" - CODE suffix ensures uniqueness
+# This prevents the "duplicated name" error in rpart when renaming columns
+feature_map[, clean_label := ifelse(
+  !is.na(detail_label) & detail_label != "",
+  paste0(str_to_title(detail_label), " [", str_to_title(category_label), "] (", toupper(code_clean), ")"),
+  paste0(original_code, " [", category_label, "] (", toupper(code_clean), ")")
+)]
+
+# 4. Deduplicate: Ensure 1:1 mapping for feature_name
+# If multiple details exist for one code (rare), pick the longest string
+feature_map <- feature_map[order(feature_name, -nchar(clean_label))]
+feature_map <- unique(feature_map, by = "feature_name")
+
+# 5. v8.0: Verify label uniqueness (belt-and-suspenders)
+label_dup_check <- feature_map[, .N, by = clean_label][N > 1]
+if(nrow(label_dup_check) > 0) {
+  warning(sprintf("Dictionary still has %d duplicate labels - adding row index as final fallback", nrow(label_dup_check)))
+  feature_map[, row_idx := .I]
+  feature_map[clean_label %in% label_dup_check$clean_label, 
+              clean_label := paste0(clean_label, " #", row_idx)]
+  feature_map[, row_idx := NULL]
+}
+
+log_check("Dictionary: All feature_names unique", uniqueN(feature_map$feature_name) == nrow(feature_map))
+log_check("Dictionary: All clean_labels unique", uniqueN(feature_map$clean_label) == nrow(feature_map))
+
+# 6. Save to Processed Data
+saveRDS(feature_map, "data/processed/ml_feature_dictionary.rds")
+fwrite(feature_map, "data/processed/ml_feature_dictionary.csv")
+
+log_check("ML Feature Dictionary Saved", file.exists("data/processed/ml_feature_dictionary.csv"))
+
 # ==============================================================================
 # STEP 5: BUILD MASTER DATASET & CALCULATE RISK FLAGS
 # ==============================================================================
@@ -344,6 +456,9 @@ message("\n--- Step 5: Master Dataset Build & Risk Calculation ---")
 
 # 5.1 Execute Left Join
 master_dataset <- merge(combined_tanks, components_wide, by = c("FAC_ID", "TANK_ID"), all.x = TRUE)
+
+# v8.0: CAPACITY checkpoint after merge
+log_check("Master: CAPACITY column present after merge", "CAPACITY" %in% names(master_dataset))
 
 # 5.2 CALCULATE RISK FLAGS (MIGRATED FROM 03)
 # ------------------------------------------------------------------------------
@@ -387,11 +502,15 @@ master_dataset[, `:=`(
   
   flag_legacy           = check_terms("cat_tank_construction", risk_terms$legacy),
   
-  # --- NEW: DATA QUALITY RISK (Unknown/Missing Info) ---
-  # Flags if ANY major component (Construction, Piping, Detection) is explicitly "Unknown", "Unmapped", or "Data Gap"
-  flag_data_unknown     = check_feat("cat_tank_construction", "Unknown|Unmapped|Data Gap") | 
-                          check_feat("cat_ug_piping", "Unknown|Unmapped|Data Gap") | 
-                          check_feat("cat_tank_release_detection", "Unknown|Unmapped|Data Gap")
+# --- DATA QUALITY RISK (Unknown/Missing Info) - BROKEN OUT BY CATEGORY ---
+  flag_tank_construction_unknown   = check_feat("cat_tank_construction", "Unknown|Unmapped|Data Gap"),
+  flag_ug_piping_unknown           = check_feat("cat_ug_piping", "Unknown|Unmapped|Data Gap"),
+  flag_tank_release_detection_unknown = check_feat("cat_tank_release_detection", "Unknown|Unmapped|Data Gap"),
+  
+  # Composite flag (preserves backward compatibility)
+  flag_data_unknown = check_feat("cat_tank_construction", "Unknown|Unmapped|Data Gap") | 
+                      check_feat("cat_ug_piping", "Unknown|Unmapped|Data Gap") | 
+                      check_feat("cat_tank_release_detection", "Unknown|Unmapped|Data Gap")
 )]
 
 # Clean up spurious columns if any
@@ -458,4 +577,4 @@ for (entry in validation_log) {
 }
 sink()
 message(sprintf("\nValidation Checklist written to: %s", checklist_path))
-message("MASTER DATASET BUILD COMPLETE (v7.0)")
+message("MASTER DATASET BUILD COMPLETE (v8.0)")

@@ -22,7 +22,10 @@
 # ==============================================================================
 
 
-
+# # Claim Management (Administrative Profile)
+#    has_fixed_price + has_tm + has_pfp_contract + has_facility_match ---are not about facility this describes contracts.
+# dont put in faciliyt stuff
+# recent closure is within 90 of replred date
 suppressPackageStartupMessages({
   library(data.table)
   library(fixest)
@@ -34,7 +37,12 @@ suppressPackageStartupMessages({
   library(scales)
   library(patchwork)
   library(here)
+  # NEW: Visualize Non-Linear Logic with a Surrogate Tree
+# "What rules best approximate the Random Forest's predictions?"
+library(rpart)
+library(rpart.plot)
 })
+
 
 source(here("R/functions/style_guide.R"))
 source(here("R/functions/save_utils.R"))
@@ -45,33 +53,17 @@ source(here("R/functions/save_utils.R"))
 paths <- list(
   master   = here("data/processed/master_analysis_dataset.rds"),
   contracts = here("data/processed/contracts_with_real_values.rds"),
-  claims = here('data/processed/claims'),
   tables   = here("output/tables"),
   figures  = here("output/figures")
 )
 
+# Standard directory creation is handled by save_utils, but keeping this is safe
 dir.create(paths$tables, recursive = TRUE, showWarnings = FALSE)
 dir.create(paths$figures, recursive = TRUE, showWarnings = FALSE)
 
-# Output helpers
-save_table <- function(tbl, name) {
-  writeLines(as.character(tbl), file.path(paths$tables, paste0(name, ".html")))
-  message(sprintf("Saved: %s.html", name))
-}
-
-save_figure <- function(p, name, width = 9, height = 6) {
-  p_clean <- p + 
-    theme_minimal(base_size = 12) +
-    theme(
-      plot.title = element_text(face = "bold", size = 14),
-      axis.title = element_text(face = "bold"),
-      legend.position = "bottom",
-      panel.grid.minor = element_blank()
-    )
-  ggsave(file.path(paths$figures, paste0(name, ".png")), p_clean, width = width, height = height, bg = "white")
-  ggsave(file.path(paths$figures, paste0(name, ".pdf")), p_clean, width = width, height = height, bg = "white")
-  message(sprintf("Saved: %s.{png,pdf}", name))
-}
+# REMOVED: Local save_table() and save_figure() definitions
+# Using functions from R/functions/save_utils.R instead
+source(here('R\\functions\\save_utils.R'))
 
 # ==============================================================================
 # 1. LOAD DATA
@@ -98,57 +90,114 @@ message(sprintf("Master: %d claims | Contracts: %d records", nrow(master), nrow(
 # ==============================================================================
 message("\n--- 1.1 Correlates of Eligibility ---")
 
-## Check status counts
-print(master[, .N, by = status_group])
+# 1.1a Define Analysis Variables & Nice Labels
+# ------------------------------------------------------------------------------
+# Map ETL variable names (left) to Publication Labels (right)
+var_map <- c(
+  # Facility / Physical
+  "n_tanks_total"       = "Total Tanks on Site",
+  "avg_tank_age"        = "Average Tank Age (Years)",
+  "paid_alae_real"      = "ALAE Costs (2025$)",        # Added base year
+  "reporting_lag_days"  = "Reporting Delay (Days)",    # Fixed: "Duration" = open time; "Lag" = delay
+  
+  # Regulatory / Human Flags (Checklist Items)
+  "has_single_walled"   = "Risk: Single-Walled System",
+  "has_unknown_data"    = "Risk: Missing/Unknown Tank Data",
+  "is_repeat_filer"     = "Operator History: Repeat Filer",
+  "prior_claims_n"      = "Operator History: Prior Claim Count" # Restored variable, fixed label
+)
 
-# Create analysis groups
+# 1.1b Prepare Data Summary
+# ------------------------------------------------------------------------------
+# Filter Groups
+target_groups <- c("Denied", "Eligible/Active")
 master[, eligibility_group := fcase(
   status_group == "Denied", "Denied",
-  status_group == "Withdrawn", "Withdrawn",
   status_group %in% c("Eligible", "Post Remedial", "Open"), "Eligible/Active",
-  default = "Other"
+  default = NA_character_
 )]
 
-# -------------------------------------------------------------------------
-# 1.1a Comprehensive Profile (Facilities + Costs + Regulatory Flags)
-# -------------------------------------------------------------------------
-
-# Define variables to analyze
-# 1. Facility Characteristics (The Physical Site)
-fac_vars <- c("n_tanks_total", "avg_tank_age_at_claim", "paid_alae_real", "claim_open_days")
-
-# 2. Human Regulatory Flags (The Checklist)
-reg_vars <- c("has_bare_steel", "has_single_walled", "has_pressure_piping", 
-              "has_noncompliant_pa", "has_unknown_material", "is_repeat_filer")
-
-analysis_vars <- c(fac_vars, reg_vars)
-
-# Summarize by group
-risk_summary <- master[eligibility_group %in% c("Denied", "Eligible/Active"), 
+# Summarize Means
+risk_summary <- master[!is.na(eligibility_group), 
                        lapply(.SD, mean, na.rm = TRUE), 
                        by = eligibility_group, 
-                       .SDcols = analysis_vars]
+                       .SDcols = names(var_map)]
 
-# Transpose for better readability
-risk_summary_long <- melt(risk_summary, id.vars = "eligibility_group", 
-                          variable.name = "Metric", value.name = "Mean_Value")
-risk_summary_wide <- dcast(risk_summary_long, Metric ~ eligibility_group, value.var = "Mean_Value")
+# Reshape & Format
+risk_long <- melt(risk_summary, id.vars = "eligibility_group", 
+                  variable.name = "var_code", value.name = "mean_val")
 
-# Calculate difference
-risk_summary_wide[, Diff_Pct := (`Denied` - `Eligible/Active`) / `Eligible/Active`]
+# Attach Readable Labels
+risk_long[, Metric := var_map[as.character(var_code)]]
 
-# Format the table
-human_risk_tbl <- kbl(risk_summary_wide, digits = 3, format = "html",
-                      caption = "Claim Characteristics: Denied vs. Eligible") %>%
-  kable_styling(bootstrap_options = c("striped", "hover")) %>%
-  pack_rows("Facility & Cost Metrics", 1, 4) %>%
-  pack_rows("Regulatory Risk Flags", 5, 10)
+# Pivot Wider for Table
+risk_wide <- dcast(risk_long, Metric ~ eligibility_group, value.var = "mean_val")
 
-save_table(human_risk_tbl, "101_eligibility_profile")
+# Calculate % Difference
+risk_wide[, Diff_Pct := (`Denied` - `Eligible/Active`) / `Eligible/Active`]
+
+# 1.1c Generate Publication Table (gt)
+# ------------------------------------------------------------------------------
+library(gt)
+
+human_risk_tbl <- risk_wide %>%
+  gt() %>%
+  cols_label(
+    Metric = "Characteristic",
+    Diff_Pct = "% Difference"
+  ) %>%
+  # Number Formatting
+  fmt_number(
+    columns = c("Denied", "Eligible/Active"),
+    rows = !grepl("\\$", Metric), # Non-currency rows
+    decimals = 2
+  ) %>%
+  fmt_currency(
+    columns = c("Denied", "Eligible/Active"),
+    rows = grepl("\\$", Metric), # Currency rows
+    decimals = 0
+  ) %>%
+  fmt_percent(
+    columns = "Diff_Pct",
+    decimals = 1
+  ) %>%
+  # Styling
+  tab_header(
+    title = "Profile of Denied vs. Eligible Claims",
+    subtitle = "Comparison of key facility risks and cost indicators"
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels()
+  ) %>%
+  # Highlight large differences
+  tab_style(
+    style = list(cell_text(color = "#e74c3c", weight = "bold")),
+    locations = cells_body(
+      columns = Diff_Pct,
+      rows = abs(Diff_Pct) > 0.5
+    )
+  ) %>%
+  tab_source_note(
+    source_note = "Source: PA USTIF Claims Database (1994-2025)"
+  )
+
+# 1.1d Save Outputs
+# ------------------------------------------------------------------------------
+# 1. Save HTML for quick viewing
+save_table((human_risk_tbl), "101_eligibility_profile")
+human_risk_tbl
+# 2. Save RDS for QMD programmatic loading (Recommended for Policy Brief)
+saveRDS(human_risk_tbl, here("output/tables/101_eligibility_profile.rds"))
+message("Saved 101_eligibility_profile.rds for QMD integration.")
+
 
 # -------------------------------------------------------------------------
 # 1.1b Formal Balance Test (T-Tests)
 # -------------------------------------------------------------------------
+# Ensure analysis_vars comes from the map defined in 1.1a
+analysis_vars <- names(var_map)
+
 bal_data <- master[eligibility_group %in% c("Denied", "Eligible/Active"), 
                    c("eligibility_group", analysis_vars), with = FALSE]
 
@@ -156,72 +205,546 @@ balance_results <- lapply(analysis_vars, function(v) {
   denied <- bal_data[eligibility_group == "Denied", get(v)]
   eligible <- bal_data[eligibility_group == "Eligible/Active", get(v)]
   
-  # Handle potential all-NA cases
+  # Safety checks for NAs or zero variance
   if(all(is.na(denied)) || all(is.na(eligible))) return(NULL)
+  if(uniqueN(na.omit(denied)) < 2 && uniqueN(na.omit(eligible)) < 2) return(NULL)
   
-  tt <- t.test(denied, eligible)
-  data.table(
-    Variable = v,
-    Mean_Denied = mean(denied, na.rm = TRUE),
-    Mean_Eligible = mean(eligible, na.rm = TRUE),
-    Difference = mean(denied, na.rm = TRUE) - mean(eligible, na.rm = TRUE),
-    P_Value = tt$p.value
-  )
+  tryCatch({
+    tt <- t.test(denied, eligible)
+    
+    data.table(
+      Variable = v,
+      Metric = var_map[v], # Use the readable label
+      Mean_Denied = mean(denied, na.rm = TRUE),
+      Mean_Eligible = mean(eligible, na.rm = TRUE),
+      Difference = mean(denied, na.rm = TRUE) - mean(eligible, na.rm = TRUE),
+      P_Value = tt$p.value
+    )
+  }, error = function(e) return(NULL))
 })
 
 balance_dt <- rbindlist(balance_results)
 
-bal_tbl <- kbl(balance_dt, digits = 3, format = "html",
-               caption = "Balance Test: Denied vs Eligible Claims") %>%
-  kable_styling() %>%
-  column_spec(5, color = ifelse(balance_dt$P_Value < 0.05, "red", "black"), 
-              bold = ifelse(balance_dt$P_Value < 0.05, TRUE, FALSE))
+# Generate GT Table
+bal_tbl <- balance_dt[, .(Metric, Mean_Denied, Mean_Eligible, Difference, P_Value)] %>%
+  gt() %>%
+  cols_label(
+    Metric = "Characteristic",
+    Mean_Denied = "Denied (Mean)",
+    Mean_Eligible = "Eligible (Mean)",
+    P_Value = "P-Value"
+  ) %>%
+  # Format numeric rows
+  fmt_number(
+    columns = c("Mean_Denied", "Mean_Eligible", "Difference"),
+    rows = !grepl("\\$", Metric),
+    decimals = 2
+  ) %>%
+  # Format currency rows
+  fmt_currency(
+    columns = c("Mean_Denied", "Mean_Eligible", "Difference"),
+    rows = grepl("\\$", Metric),
+    decimals = 0
+  ) %>%
+  # Format P-Values
+  fmt_number(
+    columns = "P_Value",
+    decimals = 4
+  ) %>%
+  # Highlight Significant Differences
+  tab_style(
+    style = list(cell_text(color = "#e74c3c", weight = "bold")),
+    locations = cells_body(
+      columns = P_Value,
+      rows = P_Value < 0.05
+    )
+  ) %>%
+  tab_header(
+    title = "Statistical Balance Test: Denied vs. Eligible",
+    subtitle = "T-Test comparing facility characteristics and risk flags"
+  ) %>%
+  tab_source_note("Source: PA USTIF Claims Database")
+bal_tbl
+# Save Outputs
+save_table((bal_tbl), "102_eligibility_balance_test")
+saveRDS(bal_tbl, here("output/tables/102_eligibility_balance_test.rds"))
+# ==============================================================================
+# 1.1e Descriptive Regression: Drivers of Denial (Linear Probability Model)
+# ==============================================================================
+message("\n--- 1.1e Modeling Denial Probability (LPM) ---")
 
-save_table(bal_tbl, "102_eligibility_balance_test")
+# Define Outcome: 1 = Denied, 0 = Eligible/Active
+denial_data <- master[eligibility_group %in% c("Denied", "Eligible/Active")]
+denial_data[, is_denied := as.integer(eligibility_group == "Denied")]
+
+# Comprehensive Formula (Human + Physical Flags)
+f_string <- paste(
+  "is_denied ~",
+  "avg_tank_age + n_tanks_total + business_category +",
+  # --- Physical Risks ---
+  "has_bare_steel + has_single_walled + has_secondary_containment +",
+  "has_pressure_piping + has_suction_piping + has_galvanized_piping +",
+  "has_electronic_atg + has_manual_detection + has_overfill_alarm +",
+  "has_gasoline + has_diesel +",
+  
+  # --- Human/Behavioral Risks ---
+  "I(reporting_lag_days/30) + is_repeat_filer + has_legacy_grandfathered + has_unknown_data +",
+  "has_recent_closure",
+  
+  # --- Fixed Effects ---
+  "| region_cluster + claim_year"
+)
+
+f_denial <- as.formula(f_string)
+
+# Run LPM (Linear Probability Model)
+denial_model <- feols(f_denial, data = denial_data, vcov = 'hetero')
+
+# Output Table
+denial_tbl <- modelsummary(
+  list("Pr(Denied)" = denial_model),
+  stars = c('*' = .1, '**' = .05, '***' = .01),
+  gof_map = c("nobs", "r.squared.adj", "fe_region_cluster", "fe_claim_year"),
+  output = "gt"
+) %>%
+  tab_header(
+    title = "Correlates of Claim Denial", 
+    subtitle = "Linear Probability Model (LPM) on Physical & Behavioral Flags"
+  ) %>%
+  tab_source_note("Controls: Region & Year FE.")
+
+save_table(as_raw_html(denial_tbl), "103_denial_drivers_regression")
+saveRDS(denial_tbl, here("output/tables/103_denial_drivers_regression.rds"))
+
+
+# ==============================================================================
+# 1.1f ML Discovery: Denial Rules (Fixed Ordering & Duplicates)
+# ==============================================================================
+message("\n--- 1.1f ML Discovery: Denial Rules ---")
+library(stringr)
+library(rpart)
+library(rpart.plot)
+
+# 1. Load Dictionary
+feature_dict <- readRDS("data/processed/ml_feature_dictionary.rds")
+setDT(feature_dict)
+
+# 2. Define Features & Matrix
+ml_features <- c(
+  "avg_tank_age", "n_tanks_total", "is_repeat_filer",
+  "reporting_lag_days", 
+  grep("^bin_", names(denial_data), value = TRUE),
+  grep("^qty_", names(denial_data), value = TRUE)
+)
+
+ml_df <- denial_data[complete.cases(denial_data[, ..ml_features])]
+X_denial <- model.matrix(as.formula(paste("~", paste(ml_features, collapse="+"), "-1")), data = ml_df)
+Y_denial <- as.factor(ml_df$is_denied)
+
+# 3. Train Probability Forest
+set.seed(999)
+pf_denial <- grf::probability_forest(
+  X = X_denial, 
+  Y = Y_denial, 
+  num.trees = 2000,
+  tune.parameters = "all",
+  seed = 999
+)
+
+# 4. Variable Importance (Sorted & Deduplicated)
+# ------------------------------------------------------------------------------
+imp_denial <- grf::variable_importance(pf_denial)
+dt_imp_denial <- data.table(Feature = colnames(X_denial), Importance = imp_denial[,1])
+
+# Match Labels
+dt_imp_denial[, Match_Key := gsub("^(bin_|qty_)", "", Feature)]
+dt_imp_denial <- merge(dt_imp_denial, feature_dict[, .(feature_name, clean_label)], 
+                       by.x = "Match_Key", by.y = "feature_name", all.x = TRUE)
+
+dt_imp_denial[, Display_Label := fcase(
+  !is.na(clean_label), clean_label,
+  Feature == "avg_tank_age", "Average Tank Age (Years)",
+  Feature == "reporting_lag_days", "Reporting Delay (Days)",
+  Feature == "is_repeat_filer", "Repeat Filer History",
+  Feature == "n_tanks_total", "Total Tanks at Facility",
+  default = Feature
+)]
+
+# --- FIX 1: DEDUPLICATE LABELS ---
+# Detects if multiple codes map to the same text (e.g. "Other") and appends code to make unique
+dt_imp_denial[, label_count := .N, by = Display_Label]
+dt_imp_denial[label_count > 1, Display_Label := paste0(Display_Label, " (", sub(".*_", "", Feature), ")")]
+dt_imp_denial[, label_count := NULL]
+
+# --- FIX 2: FORCE SORTING IN PLOT ---
+# Filter Top 15 -> Reorder Factor by Importance
+top_features <- tail(dt_imp_denial[order(Importance)], 15)
+
+p_ml_denial <- ggplot(top_features, aes(x = reorder(Display_Label, Importance), y = Importance)) +
+  geom_col(fill = "#c0392b", alpha = 0.85, width = 0.7) + 
+  coord_flip() +
+  labs(
+    x = NULL, 
+    y = "Predictive Importance (Probability Forest)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 10, color = "black"),
+    panel.grid.major.y = element_blank()
+  )
+
+save_figure(p_ml_denial, "104_ml_denial_importance")
+
+# 5. Policy Tree (Modern Style)
+# ------------------------------------------------------------------------------
+# Add predictions
+ml_df[, prob_denied := predict(pf_denial)$predictions[, 2]]
+tree_data <- ml_df[, c("prob_denied", ml_features), with = FALSE]
+
+# Rename Columns using the UNIQUE Display_Labels
+name_map <- setNames(dt_imp_denial$Display_Label, dt_imp_denial$Feature)
+cols_to_rename <- intersect(names(tree_data), names(name_map))
+setnames(tree_data, old = cols_to_rename, new = name_map[cols_to_rename])
+
+# Fit Tree
+tree_denial <- rpart(
+  prob_denied ~ ., 
+  data = tree_data,
+  method = "anova",
+  control = rpart.control(maxdepth = 3, cp = 0.01)
+)
+
+# Plot
+png(here("output/figures/104_denial_policy_tree.png"), width = 1400, height = 900, res = 150)
+
+rpart.plot(
+  tree_denial,
+  type = 4,
+  extra = 101,
+  under = TRUE,
+  box.palette = "OrRd",
+  shadow.col = NULL,
+  border.col = "gray80",
+  branch.lty = 1,
+  branch.col = "gray60",
+  nn = TRUE,
+  varlen = 0,
+  faclen = 0,
+  roundint = FALSE,
+  cex = 0.8,
+  main = NULL,
+  sub = "How to read: Top Value = Predicted Denial Probability | Bottom Value = % of Claims in this Group"
+)
+
+dev.off()
+message("Saved 104_denial_policy_tree.png (Fixed Labels)")
+
 
 # ==============================================================================
 # SECTION 1.2: DENIED CLAIMS AND ALAE ("Phantom Spend")
 # ==============================================================================
-message("\n--- 1.2 Denied Claims and ALAE ---")
+message("\n--- 1.2 Denied Claims and ALAE Analysis ---")
 
-# Total "Phantom Spend" on denied claims
+# Filter to Denied Claims
 denied_claims <- master[status_group == "Denied"]
 
-phantom_spend <- denied_claims[, .(
+# -------------------------------------------------------------------------
+# 1.2a Descriptive: "Phantom Spend" by Business Sector
+# -------------------------------------------------------------------------
+phantom_sector <- denied_claims[!is.na(business_category), .(
   N_Claims = .N,
-  Total_ALAE_Real = sum(paid_alae_real, na.rm = TRUE),
-  Mean_ALAE_Real = mean(paid_alae_real, na.rm = TRUE),
-  Median_ALAE_Real = median(paid_alae_real, na.rm = TRUE),
-  Total_Loss_Real = sum(paid_loss_real, na.rm = TRUE),
-  Mean_Duration_Days = mean(claim_duration_days, na.rm = TRUE)
+  Total_ALAE = sum(paid_alae_real, na.rm = TRUE),
+  Mean_ALAE  = mean(paid_alae_real, na.rm = TRUE),
+  Max_ALAE   = max(paid_alae_real, na.rm = TRUE)
+), by = business_category]
+
+total_phantom_alae <- sum(phantom_sector$Total_ALAE)
+phantom_sector[, Share_Pct := Total_ALAE / total_phantom_alae]
+setorder(phantom_sector, -Total_ALAE)
+
+# GT Table
+phantom_tbl <- phantom_sector %>%
+  gt() %>%
+  cols_label(
+    business_category = "Business Sector",
+    N_Claims = "Denied Claims",
+    Total_ALAE = "Total Legal Costs",
+    Mean_ALAE = "Avg Cost/Claim",
+    Share_Pct = "% of Total Spend"
+  ) %>%
+  fmt_number(columns = "N_Claims", decimals = 0) %>%
+  fmt_currency(columns = c("Total_ALAE", "Mean_ALAE", "Max_ALAE"), decimals = 0) %>%
+  fmt_percent(columns = "Share_Pct", decimals = 1) %>%
+  tab_header(
+    title = "Phantom Spend: Legal Costs on Denied Claims",
+    subtitle = sprintf("Total Expenditures: $%s across %d denied claims", 
+                       format(total_phantom_alae, big.mark = ",", nsmall=0),
+                       nrow(denied_claims))
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels()
+  ) %>%
+  data_color(columns = "Share_Pct", palette = "Reds") %>%
+  tab_source_note("Source: PA USTIF Claims Database (Denied Claims Only)")
+
+
+phantom_tbl
+
+save_table((phantom_tbl), "103_phantom_spend_by_sector")
+saveRDS(phantom_tbl, here("output/tables/103_phantom_spend_by_sector.rds"))
+
+# -------------------------------------------------------------------------
+# 1.2b Figure: ALAE vs. Reporting Lag
+# -------------------------------------------------------------------------
+plot_data_scatter <- master[paid_alae_real > 0 & reporting_lag_days > 0 & reporting_lag_days < 1825]
+
+p_alae_lag <- ggplot(plot_data_scatter, aes(x = reporting_lag_days, y = paid_alae_real)) +
+  geom_point(alpha = 0.4, color = "#2c3e50") +
+  geom_smooth(method = "gam", color = "#e74c3c", fill = "#e74c3c", alpha = 0.2) +
+  scale_y_continuous(labels = dollar_format()) +
+  scale_x_continuous(breaks = seq(0, 1800, 365), labels = 0:4) +
+  labs(x = "Reporting Delay (Years)", y = "Legal & Adjustment Costs ($)") +
+  theme_minimal() 
+
+save_figure(p_alae_lag, "104_alae_vs_reporting_lag")
+
+# ==============================================================================
+# SECTION 1.2c: REGRESSION ANALYSIS (ALAE COST DRIVERS)
+# ==============================================================================
+message("\n--- 1.2c Regression Analysis: Drivers of Phantom Spend ---")
+
+library(fixest)
+library(modelsummary)
+library(gt)
+
+# 1. Prepare Data: Filter and Fill NAs
+# ------------------------------------------------------------------------------
+# Filter to positive ALAE
+reg_data <- denied_claims[paid_alae_real > 0]
+
+
+# List of all risk flags to ensure they are clean (NA -> 0)
+risk_flags <- c("has_bare_steel", "has_single_walled", "has_secondary_containment",
+                "has_pressure_piping", "has_suction_piping", "has_galvanized_piping",
+                "has_electronic_atg", "has_manual_detection", "has_overfill_alarm",
+                "has_gasoline", "has_diesel", "has_noncompliant",
+                "has_legacy_grandfathered", "has_unknown_data", "has_recent_closure")
+
+# Loop to replace NAs with 0 (FALSE)
+for (col in risk_flags) {
+  if (col %in% names(reg_data)) {
+    set(reg_data, which(is.na(reg_data[[col]])), col, 0)
+  }
+}
+
+# 2. Define Formula
+# ------------------------------------------------------------------------------
+f_string <- paste(
+  "log(paid_alae_real) ~",
+  # --- Physical Risks ---
+  "has_bare_steel + has_single_walled + has_secondary_containment +",
+  "has_pressure_piping + has_suction_piping + has_galvanized_piping +",
+  "has_electronic_atg + has_manual_detection + has_overfill_alarm +",
+  "has_gasoline + has_diesel +",
+  
+  # --- Human/Behavioral Risks ---
+  "reporting_lag_days + is_repeat_filer +",
+  "has_noncompliant + has_legacy_grandfathered + has_unknown_data +",
+  "has_recent_closure",
+  
+  # --- Fixed Effects ---
+  "| region_cluster + claim_year"
+)
+
+f_human <- as.formula(f_string)
+
+# 3. Run Model (Robust Standard Errors)
+# ------------------------------------------------------------------------------
+# Switched from cluster="region_cluster" to vcov="hetero" to avoid semi-definite warning
+alae_human_model <- feols(f_human, data = reg_data, vcov = "hetero")
+
+message("Regression Complete. Variables kept in model:")
+print(names(coef(alae_human_model)))
+
+# 4. Output Table (GT)
+# ------------------------------------------------------------------------------
+human_tbl <- modelsummary(
+  list("Log(ALAE Cost)" = alae_human_model),
+  coef_map = c(
+    # Human/Behavioral
+    "reporting_lag_days" = "Reporting Delay (Days)",
+    "is_repeat_filerTRUE" = "Repeat Filer",
+    "has_recent_closureTRUE" = "Tank Pull (Recent Closure)",
+    "has_noncompliant" = "Flag: Non-Compliant",
+    "has_unknown_data" = "Flag: Unknown Data",
+    
+    # Physical/Tank
+    "has_single_walled" = "Flag: Single-Walled",
+    "has_bare_steel" = "Flag: Bare Steel",
+    "has_secondary_containment" = "Flag: Secondary Containment",
+    "has_gasoline" = "Substance: Gasoline"
+  ),
+  stars = c('*' = .1, '**' = .05, '***' = .01),
+  gof_map = c("nobs", "r.squared.adj", "fe_region_cluster", "fe_claim_year"),
+  output = "gt"
+) %>%
+  tab_header(
+    title = "Drivers of Legal Costs (ALAE)", 
+    subtitle = "Regression on Risk Flags (Denied Claims Only)"
+  ) %>%
+  tab_source_note("Controls: Region & Year FE. Standard Errors: Heteroskedasticity-robust (White).")
+
+# Save Outputs
+save_table((human_tbl), "105_alae_human_drivers")
+saveRDS(human_tbl, here("output/tables/105_alae_human_drivers.rds"))
+
+
+# -------------------------------------------------------------------------
+# 1.2d FWL Partial Regression Plot (Reporting Lag)
+# -------------------------------------------------------------------------
+# Visualize the unique effect of delay after controlling for all human flags
+p_fwl <- modelplot(alae_human_model, coef_map = c("reporting_lag_days" = "Reporting Delay")) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    x = "Effect on Log(ALAE) (95% CI)", 
+    y = NULL,
+    caption = "Coefficient estimate controlling for all regulatory flags + Region/Year FE"
+  ) +
+  theme_minimal()
+
+save_figure(p_fwl, "106_alae_fwl_coefplot")
+# -------------------------------------------------------------------------
+# 1.2e ML Discovery: Data-Driven Drivers (GRF)
+# -------------------------------------------------------------------------
+# Goal: Do granular signals (bin_/qty_) predict ALAE better than human flags?
+library(stringr) # Ensure stringr is loaded for label wrapping
+
+feature_dict <- readRDS("data/processed/ml_feature_dictionary.rds")
+setDT(feature_dict)
+
+message("Running ML ALAE Driver Discovery (Regression Forest)...")
+
+# 1. Define Feature Set & Matrix
+# -------------------------------------------------------------------------
+# Use all granular signals + lag/history
+ml_features <- c(
+  "reporting_lag_days", "is_repeat_filer",
+  grep("^bin_", names(reg_data), value = TRUE),
+  grep("^qty_", names(reg_data), value = TRUE)
+)
+
+# Filter complete cases first
+ml_df <- reg_data[complete.cases(reg_data[, ..ml_features])]
+
+# Create Model Matrix (Handle factors/interactions if any, usually identity for binary)
+X_ml <- model.matrix(as.formula(paste("~", paste(ml_features, collapse="+"), "-1")), data = ml_df)
+Y_ml <- log(ml_df$paid_alae_real)
+
+# 2. Train Forest (Optimized for Inference)
+# -------------------------------------------------------------------------
+# GRF Best Practices:
+# - tune.parameters = "all": Cross-validates mtry, min.node.size, sample.fraction, etc.
+# - num.trees = 2000: Recommended minimum for stable variable importance & CIs
+set.seed(789)
+rf_alae <- grf::regression_forest(
+  X = X_ml, 
+  Y = Y_ml, 
+  num.trees = 2000, 
+  tune.parameters = "all", 
+  seed = 789
+)
+
+# 3. Variable Importance (Human-Readable)
+# -------------------------------------------------------------------------
+imp_alae <- grf::variable_importance(rf_alae)
+dt_imp <- data.table(Feature = colnames(X_ml), Importance = imp_alae[,1])
+
+# -- LABEL CLEANING LOGIC --
+# 1. Extract the core key (remove bin_/qty_ prefix) to match Dictionary
+dt_imp[, Match_Key := gsub("^(bin_|qty_)", "", Feature)]
+
+# 2. Merge with Dictionary
+dt_imp <- merge(dt_imp, feature_dict[, .(feature_name, original_description, category_label)], 
+                by.x = "Match_Key", by.y = "feature_name", all.x = TRUE)
+
+# 3. Define Clean Labels (Mapped vs. Manual)
+dt_imp[, Clean_Label := fcase(
+  !is.na(original_description), paste0(original_description, " (", category_label, ")"),
+  Feature == "reporting_lag_days", "Reporting Delay (Days)",
+  Feature == "is_repeat_filer", "Prior Claims History",
+  default = Feature # Fallback
 )]
 
-message(sprintf("PHANTOM SPEND: $%s in ALAE on %d denied claims",
-                format(phantom_spend$Total_ALAE_Real, big.mark = ",", nsmall = 0),
-                phantom_spend$N_Claims))
+# 4. Cleanup: Remove codes like "1E - " for cleaner plots
+dt_imp[, Clean_Label := gsub("^[A-Z0-9]+ - ", "", Clean_Label)]
 
-# Breakdown by owner type
-phantom_by_owner <- denied_claims[!is.na(business_category), .(
-  N = .N,
-  Total_ALAE = sum(paid_alae_real, na.rm = TRUE),
-  Mean_ALAE = mean(paid_alae_real, na.rm = TRUE)
-), by = business_category][order(-Total_ALAE)]
+# -- PLOT --
+# Note: Titles removed for Quarto compatibility (captions used instead)
+p_ml_alae <- ggplot(head(dt_imp[order(-Importance)], 15), 
+                    aes(x = reorder(str_wrap(Clean_Label, 40), Importance), y = Importance)) +
+  geom_col(fill = "#2c3e50", alpha = 0.9, width = 0.75) + # Professional Slate Blue
+  coord_flip() +
+  labs(
+    x = NULL, 
+    y = "Relative Predictive Importance"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 10, color = "black"), # Readable labels
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  )
 
-phantom_tbl <- kbl(phantom_by_owner, digits = 0, format = "html",
-                   caption = "ALAE on Denied Claims by Business Type") %>%
-  kable_styling()
+save_figure(p_ml_alae, "107_ml_alae_drivers_importance")
 
-save_table(phantom_tbl, "103_phantom_spend_by_owner")
+# 4. Surrogate Tree (Flowchart with Readable Splits)
+# -------------------------------------------------------------------------
+# Add predictions to data
+ml_df[, rf_pred := predict(rf_alae)$predictions]
 
-# ALAE distribution for denied claims
-p_alae_denied <- ggplot(denied_claims[paid_alae_real > 0], aes(x = paid_alae_real)) +
-  geom_histogram(bins = 30, fill = "#e74c3c", alpha = 0.8) +
-  scale_x_log10(labels = dollar_format()) +
-  labs(title = "ALAE Distribution: Denied Claims",
-       subtitle = sprintf("N = %d claims with ALAE > $0", sum(denied_claims$paid_alae_real > 0, na.rm = TRUE)),
-       x = "ALAE (Real $, Log Scale)", y = "Count")
+# Prepare data subset for the Tree
+tree_data <- ml_df[, c("rf_pred", ml_features), with = FALSE]
 
-save_figure(p_alae_denied, "103_alae_denied_distribution")
+# -- RENAME COLUMNS FOR PLOT --
+# Create mapping vector: Technical Name -> Clean Label
+# (We filter dt_imp to only rows that exist in ml_features to be safe)
+name_map <- setNames(dt_imp$Clean_Label, dt_imp$Feature)
+
+# Identify columns in tree_data that have a mapping
+cols_to_rename <- intersect(names(tree_data), names(name_map))
+new_names <- name_map[cols_to_rename]
+
+# Apply renaming
+setnames(tree_data, old = cols_to_rename, new = new_names)
+
+# Fit Tree
+tree_surrogate <- rpart(
+  rf_pred ~ ., 
+  data = tree_data,
+  method = "anova",
+  control = rpart.control(maxdepth = 3, cp = 0.01)
+)
+
+# Save Plot
+png(here("output/figures/107_alae_policy_tree.png"), width = 1400, height = 900, res = 150)
+rpart.plot(
+  tree_surrogate,
+  type = 4, 
+  extra = 101, 
+  under = TRUE,
+  box.palette = "Blues",
+  branch.lty = 3,
+  shadow.col = "gray",
+  nn = TRUE,
+  varlen = 0, # Use full variable names (our Clean Labels)
+  faclen = 0,
+  main = "Pathways to High Legal Costs (Surrogate Model)"
+)
+dev.off()
+
+message("Saved 107_alae_policy_tree.png")
+
 
 # ==============================================================================
 # SECTION 1.3: CLOSED CLAIMS - Cost Drivers
@@ -248,7 +771,7 @@ cost_reg <- feols(
     share_bare_steel + share_pressure_piping + 
     business_category | dep_region,
   data = closed_claims[!is.na(avg_tank_age)],
-  cluster = "dep_region"
+  cluster = "region_cluster"
 )
 
 coef_map <- c(
