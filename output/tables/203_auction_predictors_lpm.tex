@@ -1,0 +1,23 @@
+\begin{table}[t]
+\caption*{
+{\fontsize{20}{25}\selectfont  What Predicts Competitive Auctions?\textsuperscript{\textit{1}}\fontsize{12}{15}\selectfont } \\ 
+{\fontsize{14}{17}\selectfont  Linear Probability Model (Significant Marginal Effects)\textsuperscript{\textit{1}}\fontsize{12}{15}\selectfont }
+} 
+\fontsize{12.0pt}{14.0pt}\selectfont
+\begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}llrr}
+\toprule
+Predictor & Effect on Auction Probability\textsuperscript{\textit{2}} & Std. Error & P-Value \\ 
+\midrule\addlinespace[2.5pt]
+Has Tank Construction Unknown & {\cellcolor[HTML]{D5F5E3}{-6.46\% (Decrease)**}} & (1.61\%) & 0.0101 \\ 
+is\_repeat\_filerTRUE & {\cellcolor[HTML]{D5F5E3}{-2.85\% (Decrease)**}} & (0.93\%) & 0.0275 \\ 
+Total Tanks at Facility & {\cellcolor[HTML]{FADBD8}{0.15\% (Increase)*}} & (0.06\%) & 0.0587 \\ 
+Avg Tank Capacity (Gal) & {\cellcolor[HTML]{D5F5E3}{-0.00\% (Decrease)*}} & (0.00\%) & 0.0690 \\ 
+\bottomrule
+\end{tabular*}
+\begin{minipage}{\linewidth}
+\textsuperscript{\textit{1}}Controls: DEP Region and Year FE. Clustered SEs (DEP Region).\\
+\textsuperscript{\textit{2}}Values represent percentage point change in auction probability.\\
+Showing 4 predictors with p < 0.10. * p<0.10, ** p<0.05, *** p<0.01\\
+\end{minipage}
+\end{table}
+

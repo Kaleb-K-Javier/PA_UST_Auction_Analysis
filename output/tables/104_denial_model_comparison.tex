@@ -1,0 +1,19 @@
+\begin{table}[t]
+\caption*{
+{\fontsize{20}{25}\selectfont  Predicting Claim Denial: Model Comparison\fontsize{12}{15}\selectfont } \\ 
+{\fontsize{14}{17}\selectfont  Human judgment (LPM) vs ML (Probability Forest)\fontsize{12}{15}\selectfont }
+} 
+\fontsize{12.0pt}{14.0pt}\selectfont
+\begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}lrrr}
+\toprule
+Approach & Brier Score & Pseudo-R\texttwosuperior & {\bfseries AUC} \\ 
+\midrule\addlinespace[2.5pt]
+Human (LPM) & 0.1388 & 4.8\% & 0.670 \\ 
+ML (Prob Forest) & 0.1427 & {\cellcolor[HTML]{D5F5E3}{2.2\%}} & {\cellcolor[HTML]{D5F5E3}{0.612}} \\ 
+\bottomrule
+\end{tabular*}
+\begin{minipage}{\linewidth}
+\textbf{Key Finding}: ML explains \textbf{-55\% more variation} than standard flags.\\
+\end{minipage}
+\end{table}
+

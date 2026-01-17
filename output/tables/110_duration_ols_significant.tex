@@ -1,0 +1,24 @@
+\begin{table}[t]
+\caption*{
+{\fontsize{20}{25}\selectfont  OLS: What Predicts Claim Duration?\fontsize{12}{15}\selectfont } \\ 
+{\fontsize{14}{17}\selectfont  Dependent Variable: Log(Duration in Months)\fontsize{12}{15}\selectfont }
+} 
+\fontsize{12.0pt}{14.0pt}\selectfont
+\begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}llrr}
+\toprule
+Predictor & Effect (Log Scale) & Std. Error & P-Value \\ 
+\midrule\addlinespace[2.5pt]
+Stores Gasoline & {\cellcolor[HTML]{FADBD8}{57.15\% (Increase)***}} & (6.89\%) & 0.0000 \\ 
+Avg Tank Age is Missing & {\cellcolor[HTML]{FADBD8}{30.80\% (Increase)***}} & (9.72\%) & 0.0015 \\ 
+has\_recent\_closureTRUE & {\cellcolor[HTML]{D5F5E3}{-24.11\% (Decrease)***}} & (3.63\%) & 0.0000 \\ 
+is\_repeat\_filerTRUE & {\cellcolor[HTML]{D5F5E3}{-18.29\% (Decrease)**}} & (7.62\%) & 0.0164 \\ 
+Has Single-Walled System & {\cellcolor[HTML]{FADBD8}{16.20\% (Increase)***}} & (5.15\%) & 0.0017 \\ 
+Total Tanks at Facility & {\cellcolor[HTML]{FADBD8}{2.09\% (Increase)***}} & (0.66\%) & 0.0016 \\ 
+Days Since Last Claim & {\cellcolor[HTML]{FADBD8}{0.00\% (Increase)***}} & (0.00\%) & 0.0040 \\ 
+\bottomrule
+\end{tabular*}
+\begin{minipage}{\linewidth}
+Controls: DEP Region \& Year FE. Robust SEs. Showing p < 0.10 only.\\
+\end{minipage}
+\end{table}
+

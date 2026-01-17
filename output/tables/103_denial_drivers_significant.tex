@@ -1,0 +1,28 @@
+\begin{table}[t]
+\caption*{
+{\fontsize{20}{25}\selectfont  What Predicts Claim Denial?\textsuperscript{\textit{1}}\fontsize{12}{15}\selectfont } \\ 
+{\fontsize{14}{17}\selectfont  Linear Probability Model (Significant Marginal Effects)\textsuperscript{\textit{1}}\fontsize{12}{15}\selectfont }
+} 
+\fontsize{12.0pt}{14.0pt}\selectfont
+\begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}llrr}
+\toprule
+Predictor & Effect on Denial Risk\textsuperscript{\textit{2}} & Std. Error & P-Value \\ 
+\midrule\addlinespace[2.5pt]
+is\_repeat\_filerTRUE & {\cellcolor[HTML]{FADBD8}{12.84\% (Increase)***}} & (2.43\%) & 0.0000 \\ 
+Has Single-Walled System & {\cellcolor[HTML]{D5F5E3}{-6.13\% (Decrease)***}} & (1.36\%) & 0.0000 \\ 
+Prior Claim Count & {\cellcolor[HTML]{D5F5E3}{-3.02\% (Decrease)***}} & (0.88\%) & 0.0006 \\ 
+Stores Gasoline & {\cellcolor[HTML]{D5F5E3}{-2.73\% (Decrease)*}} & (1.60\%) & 0.0877 \\ 
+Has Secondary Containment & {\cellcolor[HTML]{D5F5E3}{-2.54\% (Decrease)*}} & (1.53\%) & 0.0968 \\ 
+Stores Diesel & {\cellcolor[HTML]{FADBD8}{2.26\% (Increase)**}} & (1.02\%) & 0.0259 \\ 
+Total Tanks at Facility & {\cellcolor[HTML]{FADBD8}{0.39\% (Increase)**}} & (0.19\%) & 0.0347 \\ 
+Reporting Delay (Days) & {\cellcolor[HTML]{FADBD8}{0.01\% (Increase)***}} & (0.00\%) & 0.0000 \\ 
+Days Since Last Claim & {\cellcolor[HTML]{D5F5E3}{-0.00\% (Decrease)*}} & (0.00\%) & 0.0810 \\ 
+\bottomrule
+\end{tabular*}
+\begin{minipage}{\linewidth}
+\textsuperscript{\textit{1}}Controls: DEP Region and Year FE. Robust SEs.\\
+\textsuperscript{\textit{2}}Values represent percentage point change in denial probability.\\
+Showing 9 predictors with p < 0.10. * p<0.10, ** p<0.05, *** p<0.01\\
+\end{minipage}
+\end{table}
+

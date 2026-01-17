@@ -1,0 +1,28 @@
+\begin{table}[t]
+\caption*{
+{\fontsize{20}{25}\selectfont  Correlates of Cleanup Cost (Naive OLS)\textsuperscript{\textit{1}}\fontsize{12}{15}\selectfont } \\ 
+{\fontsize{14}{17}\selectfont  Dependent Variable: Log(Total Paid)\textsuperscript{\textit{1}}\fontsize{12}{15}\selectfont }
+} 
+\fontsize{12.0pt}{14.0pt}\selectfont
+\begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}llrr}
+\toprule
+Predictor & Effect on Log(Cost)\textsuperscript{\textit{2}} & Std. Error & P-Value \\ 
+\midrule\addlinespace[2.5pt]
+contract\_type\_detailedNo Contract & {\cellcolor[HTML]{D5F5E3}{-237.91\% (Decrease)***}} & (55.59\%) & 0.0079 \\ 
+contract\_type\_detailedOther/Legacy Contract & {\cellcolor[HTML]{D5F5E3}{-91.09\% (Decrease)*}} & (41.54\%) & 0.0798 \\ 
+has\_gasoline & {\cellcolor[HTML]{FADBD8}{37.85\% (Increase)***}} & (4.92\%) & 0.0006 \\ 
+has\_single\_walled & {\cellcolor[HTML]{FADBD8}{20.51\% (Increase)***}} & (3.09\%) & 0.0012 \\ 
+has\_recent\_closureTRUE & {\cellcolor[HTML]{D5F5E3}{-19.94\% (Decrease)***}} & (4.60\%) & 0.0075 \\ 
+has\_diesel & {\cellcolor[HTML]{D5F5E3}{-15.90\% (Decrease)***}} & (2.51\%) & 0.0015 \\ 
+prior\_claims\_n & {\cellcolor[HTML]{D5F5E3}{-11.75\% (Decrease)*}} & (4.90\%) & 0.0619 \\ 
+n\_tanks\_total & {\cellcolor[HTML]{FADBD8}{4.49\% (Increase)***}} & (0.91\%) & 0.0044 \\ 
+reporting\_lag\_days & {\cellcolor[HTML]{D5F5E3}{-0.03\% (Decrease)**}} & (0.01\%) & 0.0423 \\ 
+\bottomrule
+\end{tabular*}
+\begin{minipage}{\linewidth}
+\textsuperscript{\textit{1}}Controls: DEP Region and Year FE. Clustered SEs (DEP Region).\\
+\textsuperscript{\textit{2}}CAUTION: Coefficients on contract type are NOT causal. Selection bias present.\\
+Showing 9 predictors with p < 0.10. * p<0.10, ** p<0.05, *** p<0.01\\
+\end{minipage}
+\end{table}
+

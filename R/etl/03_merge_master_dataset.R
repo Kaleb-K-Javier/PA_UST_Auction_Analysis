@@ -535,6 +535,44 @@ master[, went_to_auction := as.integer(n_contracts > 0 & is_competitive)]
 master[, is_high_cost := as.integer(total_paid_real > quantile(total_paid_real, 0.90, na.rm = TRUE))]
 master[, is_long_duration := as.integer(claim_open_days > quantile(claim_open_days, 0.90, na.rm = TRUE))]
 
+
+# ==============================================================================
+# 10b. GENERATE EXPANDED FEATURE DICTIONARY (MATCHING FINAL COLUMNS)
+# ==============================================================================
+message("\n--- Generating Expanded Analysis Dictionary ---")
+
+if(file.exists(file.path(paths$processed, "ml_feature_dictionary.rds"))) {
+  
+  # 1. Load base dictionary from Step 02d
+  base_dict <- readRDS(file.path(paths$processed, "ml_feature_dictionary.rds"))
+  
+  # 2. Create Binary Version (Matches bin_* columns)
+  dict_bin <- copy(base_dict)
+  dict_bin[, original_feature_name := feature_name] # Keep track of source
+  dict_bin[, feature_name := paste0("bin_", feature_name)] # Update key to match master
+  dict_bin[, clean_label := paste0("(Binary) ", clean_label)]
+  dict_bin[, analysis_type := "Binary (Presence)"]
+  
+  # 3. Create Quantity Version (Matches qty_* columns)
+  dict_qty <- copy(base_dict)
+  dict_qty[, original_feature_name := feature_name]
+  dict_qty[, feature_name := paste0("qty_", feature_name)] # Update key to match master
+  dict_qty[, clean_label := paste0("(Count) ", clean_label)]
+  dict_qty[, analysis_type := "Quantity Count"]
+  
+  # 4. Combine into Master Analysis Dictionary
+  analysis_dict <- rbind(dict_bin, dict_qty)
+  
+  # 5. Save
+  saveRDS(analysis_dict, file.path(paths$processed, "master_analysis_dictionary.rds"))
+  fwrite(analysis_dict, file.path(paths$processed, "master_analysis_dictionary.csv"))
+  
+  message(sprintf("  Expanded Dictionary Saved: %d variables mapped (Binary + Qty)", nrow(analysis_dict)))
+  
+} else {
+  warning("ml_feature_dictionary.rds not found. Skipping expanded dictionary build.")
+}
+
 # ==============================================================================
 # 11. SAVE OUTPUTS
 # ==============================================================================

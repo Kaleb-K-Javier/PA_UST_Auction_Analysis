@@ -1,0 +1,51 @@
+<table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;border-bottom: 0;">
+<caption>Table 4.7: Early Warning System Feasibility &amp; Value Analysis</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Metric </th>
+   <th style="text-align:left;"> Value </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr grouplength="3"><td colspan="2" style="border-bottom: 1px solid;"><strong>1. Model Performance</strong></td></tr>
+<tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> How well does ML predict auctions? </td>
+   <td style="text-align:left;"> Better than random guessing </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> ML Success Rate (Precision) </td>
+   <td style="text-align:left;"> 39.7% (vs 43.3% baseline) </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> Improvement over Random (Lift) </td>
+   <td style="text-align:left;"> 0.92x better </td>
+  </tr>
+  <tr grouplength="2"><td colspan="2" style="border-bottom: 1px solid;"><strong>2. Severity Thresholds</strong></td></tr>
+<tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> What defines a 'Severe' claim? </td>
+   <td style="text-align:left;"> Top 10% most expensive or longest duration </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> Cost / Time Levels </td>
+   <td style="text-align:left;"> Cost &gt; $1,118,624 or Duration &gt; 13.8 years </td>
+  </tr>
+  <tr grouplength="2"><td colspan="2" style="border-bottom: 1px solid;"><strong>3. Value Simulation</strong></td></tr>
+<tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> If we flagged the top 20% early... </td>
+   <td style="text-align:left;"> We catch 25 actual auction cases </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;padding-left: 2em;font-weight: bold;background-color: rgba(232, 245, 233, 255) !important;" indentlevel="1"> Recoverable 'Sunk Cost' (Upper Bound)* </td>
+   <td style="text-align:left;font-weight: bold;background-color: rgba(232, 245, 233, 255) !important;"> $21,589,983 (avg $863,599 per case) </td>
+  </tr>
+</tbody>
+<tfoot>
+<tr><td style="padding: 0; " colspan="100%"><span style="font-style: italic;">Definitions:</span></td></tr>
+<tr><td style="padding: 0; " colspan="100%">
+<sup></sup> * Sunk Cost: Money spent on cleanup before the auction decision was made.</td></tr>
+<tr><td style="padding: 0; " colspan="100%">
+<sup></sup> ** Precision: % of flagged claims that actually went to auction.</td></tr>
+<tr><td style="padding: 0; " colspan="100%">
+<sup></sup> *** Lift: How many times better the model is compared to random selection.</td></tr>
+</tfoot>
+</table>

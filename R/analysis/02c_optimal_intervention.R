@@ -406,11 +406,16 @@ p_sunk_vs_lag <- ggplot(auction_claims[sunk_cost > 0 & intervention_years < 15],
   geom_point(alpha = 0.4, color = "#e74c3c") +
   geom_smooth(method = "loess", se = TRUE, color = "#2c3e50") +
   scale_y_continuous(labels = dollar_format()) +
-  labs(title = "Sunk Cost Increases with Intervention Delay",
-       subtitle = "Each year of delay adds ~$XX,XXX in pre-auction spending",
-       x = "Years from Claim to Auction",
-       y = "Sunk Cost (Real $)",
-       caption = "LIMITATION: Correlation, not causation. Harder sites take longer AND cost more.")
+ labs(
+    title = "Later Interventions Are Associated with Higher Pre-Auction Costs",
+    subtitle = "CORRELATION: Complex sites take longer to resolve AND accumulate more costs",
+    x = "Years from Claim to Auction",
+    y = "Pre-Auction Spending (Real $)",
+    caption = paste0(
+      "IMPORTANT: This does NOT show that delays 'cause' higher costs.\n",
+      "Sites sent to auction are systematically different from those resolved internally."
+    )
+  )
 
 save_figure(p_sunk_vs_lag, "403_sunk_cost_vs_intervention_lag")
 
@@ -596,6 +601,36 @@ save_figure(p_scores, "406_risk_score_distribution")
 saveRDS(pf, file.path(paths$models, "probability_forest_early_warning.rds"))
 
 # ==============================================================================
+# INTERPRETATION GUIDE (Insert before Section 4.4)
+# ==============================================================================
+message("\n")
+message(strrep("=", 70))
+message("INTERPRETATION GUIDE FOR STAKEHOLDERS")
+message(strrep("=", 70))
+message("
+WHAT THIS ANALYSIS SHOWS (Descriptive Facts):
+ - Current practice: Median 4+ years from claim to auction
+ - Regional variation: Statistically significant differences exist
+ - Predictive patterns: Certain facility traits correlate with severity
+
+WHAT THIS ANALYSIS CANNOT SHOW (Causal Questions):
+ - Whether earlier intervention WOULD reduce costs
+ - Whether the 'sunk costs' were truly avoidable
+ - Whether ML triage WOULD outperform expert judgment in practice
+
+APPROPRIATE USE:
+ ✓ Identifying candidates for expedited review
+ ✓ Generating hypotheses for pilot studies
+ ✓ Establishing baselines for future evaluation
+
+NOT APPROPRIATE:
+ ✗ Mandating policy changes without validation
+ ✗ Claiming dollar savings as 'guaranteed'
+ ✗ Replacing adjuster discretion with algorithmic rules
+")
+message(strrep("=", 70))
+
+# ==============================================================================
 # SECTION 4.4: VALUE OF INFORMATION SIMULATION
 # ==============================================================================
 message("\n--- 4.4 Value of Information ---")
@@ -645,24 +680,36 @@ message(sprintf("  Per-claim savings potential: $%s",
                 format(potential_savings / confusion_matrix$True_Positive, 
                        big.mark = ",", nsmall = 0)))
 
-# Summary table
+# Revised VOI summary with appropriate framing
 voi_summary <- data.table(
-  Metric = c("Risk Threshold (80th percentile)",
-             "Claims Flagged (Top 20%)",
-             "True Positives (Flagged & Auctioned)",
-             "False Negatives (Missed Auctions)",
-             "Potential Sunk Cost Recovery"),
-  Value = c(sprintf("%.3f", risk_threshold),
-            nrow(ml_data[flagged_explicit == 1]),
-            confusion_matrix$True_Positive,
-            confusion_matrix$False_Negative,
-            sprintf("$%s", format(potential_savings, big.mark = ",")))
+  Metric = c(
+    "Risk Threshold Used",
+    "Claims Flagged by Model",
+    "Of Those, Actually Went to Auction",
+    "Auctions Model Would Have Missed",
+    "Hypothetical Savings (Upper Bound)*"
+  ),
+  Value = c(
+    sprintf("Top 20%% (score > %.3f)", risk_threshold),
+    format(nrow(ml_data[flagged_explicit == 1]), big.mark = ","),
+    format(confusion_matrix$True_Positive, big.mark = ","),
+    format(confusion_matrix$False_Negative, big.mark = ","),
+    sprintf("$%s", format(potential_savings, big.mark = ","))
+  )
 )
 
 voi_tbl <- kbl(voi_summary, format = "html",
-               caption = "Value of Information Simulation") %>%
-  kable_styling() %>%
-  footnote(general = "UPPER BOUND estimates. Actual savings would be lower due to necessary characterization costs.")
+               caption = "Value of Information: Early Warning Pilot Potential") %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  footnote(
+    general = c(
+      "* UPPER BOUND: Assumes all pre-auction spending was avoidable waste.",
+      "  Reality: 30-70% of pre-auction costs are likely necessary site characterization.",
+      "  Recommendation: Validate with prospective pilot before policy implementation."
+    ),
+    general_title = "Critical Caveats:"
+  ) %>%
+  row_spec(5, background = "#fff3cd")  # Highlight the speculative row
 
 save_table(voi_tbl, "407_value_of_information")
 
